@@ -65,7 +65,7 @@ class Module(nn.Module):
                 ### Compute loss and update variables ###
                 loss = self.compute_loss(batch)
 
-                train_size += batch['high'].shape[0] ## Used to normalize loss when plotting
+                train_size += batch['time'].shape[0] ## Used to normalize loss when plotting
                 train_loss += loss
 
                 ### Backpropogate ###
@@ -100,7 +100,7 @@ class Module(nn.Module):
 
         with torch.no_grad():
             for batch in tqdm.tqdm(valid_dataloader, desc=valid_description):
-                size += batch['high'].shape[0] ## Used to normalize loss when plotting
+                size += batch['time'].shape[0] ## Used to normalize loss when plotting
                 loss += self.compute_loss(batch)
 
         return size, loss
