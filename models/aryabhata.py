@@ -18,15 +18,47 @@ class Module(nn.Module):
         self.device = torch.device('cuda') if self.args.gpu else torch.device('cpu')
 
         ### Layers Here ###
+        self.linear_theta1 = nn.Linear(1, 1)
+        self.linear_radius1 = nn.Linear(1, 1)
 
+        self.linear_manda = nn.Linear(1, 1)
+
+        self.linear_phi2 = nn.Linear(1, args.planet)
+        self.linear_theta2 = nn.Linear(1, args.planet)
+        self.linear_radius2 = nn.Linear(1, args.planet)
         ### End Layers ###
 
         self.to(self.device)
 
-    def forward(self):
+    def forward(self, t):
         ### Models Here ###
+        B = t.shape[0]
 
+        theta_1 = self.linear_theta1(t) # -> B x 1
+        radius_1 = self.linear_radius1(t) # -> B x 1
+
+        mean_sun_x = torch.sin(thetha_1) * radius_1 # -> B x 1
+        mean_sun_y = torch.cos(theta_1) * radius_1 # -> B x 1
+        mean_sun_z = torch.tensor(0, dtype=torch.float).to(self.device) # -> B x 1
+
+        manda_x = mean_sun_x.expand(B, args.planet)
+        manda_y = mean_sun_y.expand(B, args.planet)
+        manda_z = self.linear_manda(mean_sun_z).expand(B, args.planet)
+
+        phi_2 = self.linear_phi2(torch.tensor(1).to(self.device))
+        theta_2 = self.linear_theta2(t)
+        radius_2 = self.linear_radius(torch.tensor(1).to(self.device))
+
+        sighara_x = (radius_2 * torch.sin(phi_2) * torch.cos(theta_2)) + manda_x
+        sighara_y = (radius_2 * torch.sin(phi_2) * torch.sin(theta_2)) + manda_y
+        sighara_z = (radius_2 * torch.cos(phi_2)) + manda_z
+
+        positions = self.convert_coordinates(sighara_x, sighara_y, sighara_z)
+
+        return positions
         ### End Model ###
+
+    def convert_coordinates(self, x, y, z):
         pass
 
     def run_train(self, data):

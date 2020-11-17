@@ -27,6 +27,7 @@ if __name__ == '__main__':
     ### Retrieve arguments ###
     args = parser.parse_args()
     args.dout = args.dout.format(**vars(args))
+    args.dout = args.writer.format(**vars(args))
 
     ### Make directory to store model ###
     if not os.path.isdir(args.dout):
