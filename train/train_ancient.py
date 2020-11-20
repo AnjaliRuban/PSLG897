@@ -3,9 +3,10 @@ import sys
 import torch
 import json
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
+from importlib import import_module
 
-sys.path.append(os.path.join(os.environ['189_ROOT']))
-sys.path.append(os.path.join(os.environ['189_ROOT'], 'models'))
+sys.path.append(os.path.join(os.environ['L189_ROOT']))
+sys.path.append(os.path.join(os.environ['L189_ROOT'], 'models'))
 
 if __name__ == '__main__':
     ### Set up parser ###
@@ -20,9 +21,13 @@ if __name__ == '__main__':
 
     parser.add_argument('--gpu', help='Use gpu', action='store_true')
     parser.add_argument('--workers', help='Number of workers for each dataloader', default=8, type=int)
+    parser.add_argument('--planet', help='Number of planets', default=5, type=int)
     parser.add_argument('--epoch', help='Number of epochs', default=20, type=int)
     parser.add_argument('--batch', help='Size of batches', default=512, type=int)
     parser.add_argument('--lr', help='optimizer learning rate', default=1e-4, type=float)
+    parser.add_argument('--latitude', help='latitude', default=78.9629, type=float)
+    parser.add_argument('--longtitude', help='longtitude', default=20.5937, type=float)
+    parser.add_argument('--alt', help='alt', default=0, type=float)
 
     ### Retrieve arguments ###
     args = parser.parse_args()
@@ -34,11 +39,15 @@ if __name__ == '__main__':
         os.makedirs(args.dout)
 
     ### Import selected model ###
-    M = import_module('models.model.{}'.format(args.model))
+    M = import_module('models.{}'.format(args.model))
     data = {
-        'train': os.path.join(args.data, 'train.json'),
-        'valid': os.path.join(args.data, 'valid.json')
+        'train': os.path.join(args.data, 'planet_data.json'),
+        'valid': os.path.join(args.data, 'planet_data.json')
     }
+    # data = {
+    #     'train': os.path.join(args.data, 'train.json'),
+    #     'valid': os.path.join(args.data, 'valid.json')
+    # }
 
     ### Load and run selected model ###
     model = M.Module(args)
