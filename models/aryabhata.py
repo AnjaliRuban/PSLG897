@@ -4,11 +4,14 @@ import random
 import json
 import tqdm
 import torch
+import pyproj
+import numpy as np
 from torch import nn
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
 from planet_loader import PlanetDataset, collate_fn
+
 
 
 class Module(nn.Module):
@@ -58,8 +61,54 @@ class Module(nn.Module):
         return positions
         ### End Model ###
 
+
+    def gps_to_ecef_pyproj(lat, lon, alt):
+        ecef = pyproj.Proj(proj='geocent', ellps='WGS84', datum='WGS84')
+        lla = pyproj.Proj(proj='latlong', ellps='WGS84', datum='WGS84')
+        x, y, z = pyproj.transform(lla, ecef, lon, lat, alt, radians=False)
+
+        return x, y, z
+
+    def ecef_to_gps_pyproj(x,y,z):
+        ecef = pyproj.Proj(proj='geocent', ellps='WGS84', datum='WGS84')
+        lla = pyproj.Proj(proj='latlong', ellps='WGS84', datum='WGS84')
+        lon, lat, alt = pyproj.transform(ecef, lla, x, y, z, radians=False)
+
+        return lon, lat, alt 
+
+    def unit_vector(vector):
+        """ Returns the unit vector of the vector.  """
+        return vector / np.linalg.norm(vector)
+
+    def angle_between(v1, v2):
+        """ Returns the angle in radians between vectors 'v1' and 'v2'::
+
+                >>> angle_between((1, 0, 0), (0, 1, 0))
+                1.5707963267948966
+                >>> angle_between((1, 0, 0), (1, 0, 0))
+                0.0
+                >>> angle_between((1, 0, 0), (-1, 0, 0))
+                3.141592653589793
+        """
+        v1_u = unit_vector(v1)
+        v2_u = unit_vector(v2)
+        return np.arccos(np.clip(np.dot(v1_u, v2_u), -1.0, 1.0))
+
     def convert_coordinates(self, x, y, z):
-        pass
+        # self.args.latitude
+        # self.args.longtitude 
+        # altitude
+        x_pos, y_pos, z_pos = gps_to_ecef_pyproj(self.args.latitude, self.args.longtitude, self.alt)
+        altitude = angle_between(np.array([x_pos, y_pos, z_pos]), np.array([x-x_pos, y-y_pos, z-z_pos]))
+
+
+        # azimuth
+        lon, lat, _ = ecef_to_gps_pyproj(x, y, z)
+        geodesic = pyproj.Geod(ellps='WGS84')
+        azimuth,_,_ = geodesic.inv(self.args.latitude, self.args.longtitude, lat, lon)
+
+
+        return altitude, azimuth
 
     def run_train(self, data):
         ### Setup ###
@@ -151,3 +200,5 @@ class Module(nn.Module):
         loss = F.mse_loss(pred_positions, true_positions)
 
         return loss
+
+
