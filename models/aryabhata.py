@@ -35,52 +35,113 @@ class Module(nn.Module):
 
     def forward(self, t):
         ### Models Here ###
+        args = self.args
         B = t.shape[0]
-
+        t = t.unsqueeze(1)
         theta_1 = self.linear_theta1(t) # -> B x 1
         radius_1 = self.linear_radius1(t) # -> B x 1
 
-        mean_sun_x = torch.sin(thetha_1) * radius_1 # -> B x 1
+        mean_sun_x = torch.sin(theta_1) * radius_1 # -> B x 1
         mean_sun_y = torch.cos(theta_1) * radius_1 # -> B x 1
-        mean_sun_z = torch.tensor(0, dtype=torch.float).to(self.device) # -> B x 1
+        mean_sun_z = torch.zeros(B, dtype=torch.float).to(self.device).unsqueeze(1) # -> B x 1
 
         manda_x = mean_sun_x.expand(B, args.planet)
         manda_y = mean_sun_y.expand(B, args.planet)
         manda_z = self.linear_manda(mean_sun_z).expand(B, args.planet)
 
-        phi_2 = self.linear_phi2(torch.tensor(1).to(self.device))
+        phi_2 = self.linear_phi2(torch.ones(B, dtype=torch.float).to(self.device).unsqueeze(1))
         theta_2 = self.linear_theta2(t)
-        radius_2 = self.linear_radius(torch.tensor(1).to(self.device))
+        radius_2 = self.linear_radius2(torch.ones(B, dtype=torch.float).to(self.device).unsqueeze(1))
 
         sighara_x = (radius_2 * torch.sin(phi_2) * torch.cos(theta_2)) + manda_x
         sighara_y = (radius_2 * torch.sin(phi_2) * torch.sin(theta_2)) + manda_y
         sighara_z = (radius_2 * torch.cos(phi_2)) + manda_z
 
-        positions = self.convert_coordinates(sighara_x, sighara_y, sighara_z)
-
-        return positions
+        alt, az = self.convert_coordinates(sighara_x, sighara_y, sighara_z)
+        positions = torch.stack([alt, az], dim=1)
+        return positions.reshape(50,10)
         ### End Model ###
 
+    def gps_to_ecef_custom(self, lat, lon, alt):
+        rad_lat = lat * torch.tensor(np.pi / 180.0).to(self.device)
+        rad_lon = lon * torch.tensor(np.pi / 180.0).to(self.device)
 
-    def gps_to_ecef_pyproj(lat, lon, alt):
-        ecef = pyproj.Proj(proj='geocent', ellps='WGS84', datum='WGS84')
-        lla = pyproj.Proj(proj='latlong', ellps='WGS84', datum='WGS84')
-        x, y, z = pyproj.transform(lla, ecef, lon, lat, alt, radians=False)
+        a = torch.tensor(6378137, dtype=torch.float).to(self.device)
+        finv = 298.257223563
+        f = 1 / finv
+        e2 = 1 - (1 - f) * (1 - f)
+        e2 =  torch.tensor(e2, dtype=torch.float).to(self.device)
+        v = torch.div(a, torch.sqrt(1 - e2 * torch.sin(rad_lat) * torch.sin(rad_lat)))
+
+        x = (v + alt) * torch.cos(rad_lat) * torch.cos(rad_lon)
+        y = (v + alt) * torch.cos(rad_lat) * torch.sin(rad_lon)
+        z = (v * (1 - e2) + alt) * torch.sin(rad_lat)
 
         return x, y, z
 
-    def ecef_to_gps_pyproj(x,y,z):
-        ecef = pyproj.Proj(proj='geocent', ellps='WGS84', datum='WGS84')
-        lla = pyproj.Proj(proj='latlong', ellps='WGS84', datum='WGS84')
-        lon, lat, alt = pyproj.transform(ecef, lla, x, y, z, radians=False)
+    
 
-        return lon, lat, alt 
+    def ecef2lla(self, x, y, z) :
 
-    def unit_vector(vector):
-        """ Returns the unit vector of the vector.  """
-        return vector / np.linalg.norm(vector)
+        a = torch.tensor(6378137, dtype=torch.float).to(self.device)
+        f = torch.tensor(0.0034, dtype=torch.float).to(self.device)
+        b = torch.tensor(6.3568e6, dtype=torch.float).to(self.device)
+        e = torch.sqrt(torch.div(torch.pow(a, 2) - torch.pow(b, 2) , torch.pow(a, 2)))
+        e2 = torch.sqrt(torch.div(torch.pow(a, 2) - torch.pow(b, 2) , torch.pow(b, 2)))
 
-    def angle_between(v1, v2):
+        lla = torch.zeros(3, 50, 5).to(self.device)
+        
+        p = torch.sqrt(torch.pow(x, 2) + torch.pow(y, 2))
+
+        theta = torch.arctan(torch.div((z * a), (p * b)))
+
+        lon = torch.arctan(torch.div(y, x))
+
+        first = z + torch.pow(e2, 2) * b * torch.pow(torch.sin(theta), 3)
+        second = p - torch.pow(e, 2) * a * torch.pow(torch.cos(theta), 3)
+        lat = torch.arctan(torch.div(first, second))
+        N = torch.div(a, (torch.sqrt(1 - (torch.pow(e, 2) * torch.pow(torch.sin(lat), 2)))))
+
+        m = torch.div(p, torch.cos(lat))
+        height = m - N
+
+        lon = torch.div(lon * 180, torch.tensor(np.pi)).to(self.device)
+        lat = torch.div(lat * 180, torch.tensor(np.pi)).to(self.device)
+        lla[0] = lat
+        lla[1] = lon
+        lla[2] = height
+
+        return lla
+
+    # def gps_to_ecef_pyproj(self, lat, lon, alt):
+    #     ecef = pyproj.Proj(proj='geocent', ellps='WGS84', datum='WGS84')
+    #     lla = pyproj.Proj(proj='latlong', ellps='WGS84', datum='WGS84')
+    #     x, y, z = pyproj.transform(lla, ecef, lon, lat, alt, radians=False)
+
+    #     return x, y, z
+
+    # def ecef_to_gps_pyproj(self, x,y,z):
+    #     ecef = pyproj.Proj(proj='geocent', ellps='WGS84', datum='WGS84')
+    #     lla = pyproj.Proj(proj='latlong', ellps='WGS84', datum='WGS84')
+    #     lon, lat, alt = pyproj.transform(ecef, lla, x, y, z, radians=False)
+
+    #     return lon, lat, alt 
+
+    def bearing(self, lat1, lon1, lat2, lon2):
+        y = torch.sin(lon2-lon1) * torch.cos(lat2)
+        x = torch.cos(lat1)*torch.sin(lat2) - torch.sin(lat1)*torch.cos(lat2)*torch.cos(lon2-lon1)
+        theta = torch.atan2(y, x)
+        brng = torch.fmod(theta*180/np.pi + 360, 360)
+        return brng
+
+    # def unit_vector(self, vector):
+    #     """ Returns the unit vector of the vector.  """
+    #     # print(vector.shape)
+
+    #     # print(torch.norm(vector, dim=2).shape)
+    #     return torch.div(vector , torch.norm(vector, dim=2).unsqueeze(2).repeat(1, 1, 3))
+
+    def angle_between(self, v1, v2):
         """ Returns the angle in radians between vectors 'v1' and 'v2'::
 
                 >>> angle_between((1, 0, 0), (0, 1, 0))
@@ -90,28 +151,44 @@ class Module(nn.Module):
                 >>> angle_between((1, 0, 0), (-1, 0, 0))
                 3.141592653589793
         """
-        v1_u = unit_vector(v1)
-        v2_u = unit_vector(v2)
-        return np.arccos(np.clip(np.dot(v1_u, v2_u), -1.0, 1.0))
+        v1_u = torch.div(v1 , torch.norm(v1, dim=1).unsqueeze(1).repeat(1, 3))
+        v1_u = v1_u.unsqueeze(1)
+        # print(v1_u.shape)
+        v2_u = torch.div(v2 , torch.norm(v2, dim=2).unsqueeze(2).repeat(1, 1, 3))
+        return torch.arccos(torch.clip(torch.bmm(v1_u, torch.transpose(v2_u, 1, 2)), -1.0, 1.0)).squeeze()
 
     def convert_coordinates(self, x, y, z):
         # self.args.latitude
         # self.args.longtitude 
         # altitude
-        x_pos, y_pos, z_pos = gps_to_ecef_pyproj(self.args.latitude, self.args.longtitude, self.alt)
-        altitude = angle_between(np.array([x_pos, y_pos, z_pos]), np.array([x-x_pos, y-y_pos, z-z_pos]))
+        x_pos, y_pos, z_pos = self.gps_to_ecef_custom(self.args.latitude, self.args.longtitude, self.args.alt)
+        B = x.shape[0]
+        b_x = torch.tensor(x_pos).expand(B,self.args.planet).to(self.device)
+        b_y = torch.tensor(y_pos).expand(B,self.args.planet).to(self.device)
+        b_z = torch.tensor(z_pos).expand(B,self.args.planet).to(self.device)
+
+        a_x = torch.tensor(x_pos).expand(B).to(self.device)
+        a_y = torch.tensor(y_pos).expand(B).to(self.device)
+        a_z = torch.tensor(z_pos).expand(B).to(self.device)
+
+        a = torch.stack([a_x, a_y, a_z], dim=-1)
+        b = torch.stack([x-b_x, y-b_y, z-b_z], dim=-1)
+        altitude = self.angle_between(a, b)
 
 
         # azimuth
-        lon, lat, _ = ecef_to_gps_pyproj(x, y, z)
-        geodesic = pyproj.Geod(ellps='WGS84')
-        azimuth,_,_ = geodesic.inv(self.args.latitude, self.args.longtitude, lat, lon)
+        lon2, lat2, _ = self.ecef2lla(x, y, z)
+        # geodesic = pyproj.Geod(ellps='WGS84')
+        lat1 = torch.tensor(self.args.latitude).repeat(B, self.args.planet)
+        lon1 = torch.tensor(self.args.longtitude).repeat(B, self.args.planet)
+        azimuth = self.bearing(lat1, lon1, lat2, lon2)
 
 
         return altitude, azimuth
 
     def run_train(self, data):
         ### Setup ###
+        args = self.args
         self.writer = SummaryWriter(args.writer) ## Our summary writer, which plots loss over time
         self.fsave = os.path.join(args.dout, 'best.pth') ## The path to the best version of our model
 
@@ -192,9 +269,11 @@ class Module(nn.Module):
         ### Move data to GPU if available ###
         times = batch['time'].to(self.device)
         true_positions = batch['pos'].to(self.device)
+        # print(true_positions.shape)
 
         ### Run forward ###
         pred_positions = self.forward(times)
+        print(pred_positions.shape)
 
         ### Compute loss on results ###
         loss = F.mse_loss(pred_positions, true_positions)

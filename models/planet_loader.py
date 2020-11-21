@@ -49,7 +49,7 @@ def collate_fn(batch):
     times = torch.stack(times)
     positions = torch.stack(positions)
 
-    return return {
+    return {
         'time': times,
         'pos': positions
     }
