@@ -41,8 +41,8 @@ if __name__ == '__main__':
     ### Import selected model ###
     M = import_module('models.{}'.format(args.model))
     data = {
-        'train': os.path.join(args.data, 'planet_data.json'),
-        'valid': os.path.join(args.data, 'planet_data.json')
+        'train': os.path.join(args.data, 'aryabata.json'),
+        'valid': os.path.join(args.data, 'aryabata_validation.json')
     }
     # data = {
     #     'train': os.path.join(args.data, 'train.json'),

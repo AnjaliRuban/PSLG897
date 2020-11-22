@@ -59,7 +59,7 @@ class Module(nn.Module):
 
         alt, az = self.convert_coordinates(sighara_x, sighara_y, sighara_z)
         positions = torch.stack([alt, az], dim=1)
-        return positions.reshape(50,10)
+        return positions.reshape(B,10)
         ### End Model ###
 
     def gps_to_ecef_custom(self, lat, lon, alt):
@@ -82,14 +82,14 @@ class Module(nn.Module):
     
 
     def ecef2lla(self, x, y, z) :
-
+        B = x.shape[0]
         a = torch.tensor(6378137, dtype=torch.float).to(self.device)
         f = torch.tensor(0.0034, dtype=torch.float).to(self.device)
         b = torch.tensor(6.3568e6, dtype=torch.float).to(self.device)
         e = torch.sqrt(torch.div(torch.pow(a, 2) - torch.pow(b, 2) , torch.pow(a, 2)))
         e2 = torch.sqrt(torch.div(torch.pow(a, 2) - torch.pow(b, 2) , torch.pow(b, 2)))
 
-        lla = torch.zeros(3, 50, 5).to(self.device)
+        lla = torch.zeros(3, B, self.args.planet).to(self.device)
         
         p = torch.sqrt(torch.pow(x, 2) + torch.pow(y, 2))
 
@@ -163,13 +163,13 @@ class Module(nn.Module):
         # altitude
         x_pos, y_pos, z_pos = self.gps_to_ecef_custom(self.args.latitude, self.args.longtitude, self.args.alt)
         B = x.shape[0]
-        b_x = torch.tensor(x_pos).expand(B,self.args.planet).to(self.device)
-        b_y = torch.tensor(y_pos).expand(B,self.args.planet).to(self.device)
-        b_z = torch.tensor(z_pos).expand(B,self.args.planet).to(self.device)
+        b_x = x_pos.expand(B,self.args.planet).to(self.device)
+        b_y = y_pos.expand(B,self.args.planet).to(self.device)
+        b_z = z_pos.expand(B,self.args.planet).to(self.device)
 
-        a_x = torch.tensor(x_pos).expand(B).to(self.device)
-        a_y = torch.tensor(y_pos).expand(B).to(self.device)
-        a_z = torch.tensor(z_pos).expand(B).to(self.device)
+        a_x = x_pos.expand(B).to(self.device)
+        a_y = y_pos.expand(B).to(self.device)
+        a_z = z_pos.expand(B).to(self.device)
 
         a = torch.stack([a_x, a_y, a_z], dim=-1)
         b = torch.stack([x-b_x, y-b_y, z-b_z], dim=-1)
@@ -235,18 +235,19 @@ class Module(nn.Module):
             valid_loss, valid_size = self.run_eval(valid_dataloader, valid_description)
 
             ### Write to SummaryWriter ###
-            self.writer.add_scalar("Loss/Train", str(train_loss/train_size), epoch)
-            self.writer.add_scalar("Loss/Valid", str(valid_loss/valid_size), epoch)
+            self.writer.add_scalar("Loss/Train", (train_loss/train_size).item(), epoch)
+            self.writer.add_scalar("Loss/Valid", (valid_loss/valid_size).item(), epoch)
             self.writer.flush()
 
             ### Save model if it is better that the previous ###
+
             if valid_loss < best_loss:
-                print( "Obtained a new best validation loss of {:.2f}, saving model checkpoint to {}...".format(valid_loss, fsave))
+                print( "Obtained a new best validation loss of {:.2f}, saving model checkpoint to {}...".format(valid_loss.item(), self.fsave))
                 torch.save({
                     'model': self.state_dict(),
                     'optim': optimizer.state_dict(),
                     'args': self.args
-                }, fsave)
+                }, self.fsave)
                 best_loss = valid_loss
 
         self.writer.close()
@@ -273,7 +274,7 @@ class Module(nn.Module):
 
         ### Run forward ###
         pred_positions = self.forward(times)
-        print(pred_positions.shape)
+        # print(pred_positions.shape)
 
         ### Compute loss on results ###
         loss = F.mse_loss(pred_positions, true_positions)
