@@ -24,7 +24,7 @@ class Module(nn.Module):
         self.linear_theta1 = nn.Linear(1, 1)
         self.linear_radius1 = nn.Linear(1, 1)
 
-        self.linear_manda = nn.Linear(1, 1)
+        self.linear_manda = nn.Linear(1, args.planet)
 
         self.linear_phi2 = nn.Linear(1, args.planet)
         self.linear_theta2 = nn.Linear(1, args.planet)
@@ -47,23 +47,18 @@ class Module(nn.Module):
 
         manda_x = mean_sun_x.expand(B, args.planet)
         manda_y = mean_sun_y.expand(B, args.planet)
-        manda_z = self.linear_manda(mean_sun_z).expand(B, args.planet)
+        manda_z = self.linear_manda(mean_sun_z)
 
-        # phi_2 = self.linear_phi2(torch.ones(B, dtype=torch.float).to(self.device).unsqueeze(1))
-        # theta_2 = self.linear_theta2(t)
-        # radius_2 = self.linear_radius2(torch.ones(B, dtype=torch.float).to(self.device).unsqueeze(1))
-
-
-        phi_2 = self.linear_phi2(t)
+        phi_2 = self.linear_phi2(torch.ones(B, dtype=torch.float).to(self.device).unsqueeze(1))
         theta_2 = self.linear_theta2(t)
-        radius_2 = self.linear_radius2(t)
+        radius_2 = self.linear_radius2(torch.ones(B, dtype=torch.float).to(self.device).unsqueeze(1))
 
         sighara_x = (radius_2 * torch.sin(phi_2) * torch.cos(theta_2)) + manda_x
         sighara_y = (radius_2 * torch.sin(phi_2) * torch.sin(theta_2)) + manda_y
         sighara_z = (radius_2 * torch.cos(phi_2)) + manda_z
 
         alt, az = self.convert_coordinates(sighara_x, sighara_y, sighara_z)
-        positions = torch.stack([az, alt], dim=-1)
+        positions = torch.stack([alt, az], dim=1)
         return positions.reshape(B,10)
         ### End Model ###
 
@@ -222,10 +217,7 @@ class Module(nn.Module):
 
             self.train()
 
-            counter = 0
-
             for batch in tqdm.tqdm(train_dataloader, desc=train_description):
-                counter+=1
                 optimizer.zero_grad() ## You don't want to accidentally have leftover gradients
 
                 ### Compute loss and update variables ###
@@ -233,8 +225,6 @@ class Module(nn.Module):
 
                 train_size += batch['time'].shape[0] ## Used to normalize loss when plotting
                 train_loss += loss
-
-                self.writer.add_scalar("Loss/Train", (loss/batch['time'].shape[0]).item(), counter)
 
                 ### Backpropogate ###
                 loss.backward()
@@ -272,7 +262,7 @@ class Module(nn.Module):
                 size += batch['time'].shape[0] ## Used to normalize loss when plotting
                 loss += self.compute_loss(batch)
 
-        return loss, size
+        return size, loss
 
     def compute_loss(self, batch):
         batch_size = batch['time'].shape[0]
@@ -284,9 +274,6 @@ class Module(nn.Module):
 
         ### Run forward ###
         pred_positions = self.forward(times)
-        # print(pred_positions[:5])
-        # print('ALok wanted this')
-        # print(true_positions[:5])
         # print(pred_positions.shape)
 
         ### Compute loss on results ###
