@@ -3,6 +3,8 @@ import numpy as np
 
 def calcPlanetPosition(local_latitude, local_longitude, year, month, day, time, planet):
 
+	print(planet)
+
 	d = 367*year - 7 * (year + (month+9)/12 ) / 4 - 3 * ((year + (month-9)/7 ) / 100 + 1 ) / 4 + 275*month/9 + day - 730515
 	d = d + time / 24.0
 
@@ -21,12 +23,12 @@ def calcPlanetPosition(local_latitude, local_longitude, year, month, day, time, 
 	sun_e = 0.016709 - 1.151E-9 * d
 	sun_M = 356.0470 + 0.9856002585 * d
 
-	E = M + e*(180/np.pi) * np.sin(M) * ( 1.0 + e * np.cos(M) )
+	E = M + e*(180/np.pi) * degreeSin(M) * ( 1.0 + e * degreeCos(M) )
 
-	xv = np.cos(E) - e
-	yv = np.sqrt(1.0 - e*e) * np.sin(E)
+	xv = degreeCos(E) - e
+	yv = np.sqrt(1.0 - e*e) * degreeSin(E)
 
-	v = np.arctan2( yv, xv )
+	v = degreeArctan2( yv, xv )
 	rs = np.sqrt( xv*xv + yv*yv )
 
 	lonsun = v + sun_w
@@ -75,7 +77,7 @@ def calcPlanetPosition(local_latitude, local_longitude, year, month, day, time, 
 		M = 316.9670 + 0.0334442282 * d
 
 
-	E = M + e * np.sin(M) * ( 1.0 + e * np.cos(M) )
+	E = M + e * degreeSin(M) * ( 1.0 + e * degreeCos(M) )
 
 	if(e > 0.055):
 		E1 = 0.0
@@ -84,87 +86,101 @@ def calcPlanetPosition(local_latitude, local_longitude, year, month, day, time, 
 		while E1 - E0 > 0.001 or E0 - E1 > 0.001:
 			if(j != 0):
 				E0 = E1
-			E1 = E0 - ( E0 - e*(180/np.pi) * np.sin(E0) - M ) / ( 1 - e * np.cos(E0) )
+			E1 = E0 - ( E0 - e*(180/np.pi) * degreeSin(E0) - M ) / ( 1 - e * degreeCos(E0) )
 			j += 1
 			if j >= 99999:
 				print("NOOOOOOOO TOO MANY ITERATIONS USE OTHER FORMULA SAD")
 				return
 		E = E1
 
-	xv = a * ( np.cos(E) - e )
-	yv = a * ( np.sqrt(1.0 - e*e) * np.sin(E) )
+	xv = a * ( degreeCos(E) - e )
+	yv = a * ( np.sqrt(1.0 - e*e) * degreeSin(E) )
 
-	v = np.arctan2( yv, xv )
+	v = degreeArctan2( yv, xv )
 	r = np.sqrt( xv*xv + yv*yv )
 
-	xh = r * (np.cos(N) * np.cos(v+w) - np.sin(N) * np.sin(v+w) * np.cos(i))
-	yh = r * (np.sin(N) * np.cos(v+w) + np.cos(N) * np.sin(v+w) * np.cos(i))
-	zh = r * (np.sin(v+w) * np.sin(i) )
+	xh = r * (degreeCos(N) * degreeCos(v+w) - degreeSin(N) * degreeSin(v+w) * degreeCos(i))
+	yh = r * (degreeSin(N) * degreeCos(v+w) + degreeCos(N) * degreeSin(v+w) * degreeCos(i))
+	zh = r * (degreeSin(v+w) * degreeSin(i) )
 
-	lonecl = np.arctan2( yh, xh )
-	latecl = np.arctan2( zh, np.sqrt(xh*xh+yh*yh) )
+	lonecl = degreeArctan2( yh, xh )
+	latecl = degreeArctan2( zh, np.sqrt(xh*xh+yh*yh) )
 
 	if planet == "Jupiter":
 		Ms = 316.9670 + 0.0334442282 * d
 		Mj = M
-		lonecl -= 0.332 * np.sin(2*Mj - 5*Ms - 67.6)
-		lonecl -= 0.056 * np.sin(2*Mj - 2*Ms + 21)
-		lonecl += 0.042 * np.sin(3*Mj - 5*Ms + 21)
-		lonecl -= 0.036 * np.sin(Mj - 2*Ms)
-		lonecl += 0.022 * np.cos(Mj - Ms)
-		lonecl += 0.023 * np.sin(2*Mj - 3*Ms + 52)
-		lonecl -= 0.016 * np.sin(Mj - 5*Ms - 69)
+		lonecl -= 0.332 * degreeSin(2*Mj - 5*Ms - 67.6)
+		lonecl -= 0.056 * degreeSin(2*Mj - 2*Ms + 21)
+		lonecl += 0.042 * degreeSin(3*Mj - 5*Ms + 21)
+		lonecl -= 0.036 * degreeSin(Mj - 2*Ms)
+		lonecl += 0.022 * degreeCos(Mj - Ms)
+		lonecl += 0.023 * degreeSin(2*Mj - 3*Ms + 52)
+		lonecl -= 0.016 * degreeSin(Mj - 5*Ms - 69)
 
 	if planet == "Saturn":
 		Mj = 19.8950 + 0.0830853001 * d
 		Ms = M
-		lonecl += 0.812 * np.sin(2*Mj - 5*Ms - 67.6)
-		lonecl -= 0.229 * np.cos(2*Mj - 4*Ms - 2)
-		lonecl += 0.119 * np.sin(Mj - 2*Ms - 3)
-		lonecl += 0.046 * np.sin(2*Mj - 6*Ms - 69)
-		lonecl += 0.014 * np.sin(Mj - 3*Ms + 32)
+		lonecl += 0.812 * degreeSin(2*Mj - 5*Ms - 67.6)
+		lonecl -= 0.229 * degreeCos(2*Mj - 4*Ms - 2)
+		lonecl += 0.119 * degreeSin(Mj - 2*Ms - 3)
+		lonecl += 0.046 * degreeSin(2*Mj - 6*Ms - 69)
+		lonecl += 0.014 * degreeSin(Mj - 3*Ms + 32)
 
-		latecl -= 0.020 * np.cos(2*Mj - 4*Ms - 2)
-		latecl += 0.018 * np.sin(2*Mj - 6*Ms - 49)
+		latecl -= 0.020 * degreeCos(2*Mj - 4*Ms - 2)
+		latecl += 0.018 * degreeSin(2*Mj - 6*Ms - 49)
 
-	xh = r * np.cos(lonecl) * np.cos(latecl)
-	yh = r * np.sin(lonecl) * np.cos(latecl)
-	zh = r * np.sin(latecl)
+	xh = r * degreeCos(lonecl) * degreeCos(latecl)
+	yh = r * degreeSin(lonecl) * degreeCos(latecl)
+	zh = r * degreeSin(latecl)
 
-	xs = rs * np.cos(lonsun)
-	ys = rs * np.sin(lonsun)
+	xs = rs * degreeCos(lonsun)
+	ys = rs * degreeSin(lonsun)
 
 	xg = xh + xs
 	yg = yh + ys
 	zg = zh
 
 	xe = xg
-	ye = yg * np.cos(ecl) - zg * np.sin(ecl)
-	ze = yg * np.sin(ecl) + zg * np.cos(ecl)
+	ye = yg * degreeCos(ecl) - zg * degreeSin(ecl)
+	ze = yg * degreeSin(ecl) + zg * degreeCos(ecl)
 
-	RA  = np.arctan2( ye, xe )
-	Decl = np.arctan2( ze, np.sqrt(xe*xe+ye*ye) )
+	RA  = degreeArctan2( ye, xe )
+	Decl = degreeArctan2( ze, np.sqrt(xe*xe+ye*ye) )
 
 	HA = sun_LST - RA
 
-	x = np.cos(HA) * np.cos(Decl)
-	y = np.sin(HA) * np.cos(Decl)
-	z = np.sin(Decl)
+	x = degreeCos(HA) * degreeCos(Decl)
+	y = degreeSin(HA) * degreeCos(Decl)
+	z = degreeSin(Decl)
 
-	xhor = x * np.sin(local_latitude) - z * np.cos(local_latitude)
+	xhor = x * degreeSin(local_latitude) - z * degreeCos(local_latitude)
 	yhor = y
-	zhor = x * np.cos(local_latitude) + z * np.sin(local_latitude)
+	zhor = x * degreeCos(local_latitude) + z * degreeSin(local_latitude)
 
-	az  = np.arctan2( yhor, xhor ) + 180
-	alt = np.arctan2( zhor, np.sqrt(xhor*xhor+yhor*yhor) )
+	az  = degreeArctan2( yhor, xhor ) + 180
+	alt = degreeArctan2( zhor, np.sqrt(xhor*xhor+yhor*yhor) )
 
 	print(az)
 	print(alt)
 	return az, alt
 
 
+def degreeCos(deg):
+	return np.cos(np.deg2rad(deg))
+
+def degreeSin(deg):
+	return np.sin(np.deg2rad(deg))
+
+def degreeArctan2(val1, val2):
+	return np.rad2deg(np.arctan2(val1, val2))
+
+
+
 if __name__=="__main__": 
-    calcPlanetPosition(22, 77, 1900, 3, 15, 8, "Mercury")
+    calcPlanetPosition(20.5937, 78.9629, 496, 1, 1, 0, "Jupiter")
+
+
+
 
 
 
