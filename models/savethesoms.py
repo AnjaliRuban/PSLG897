@@ -49,20 +49,16 @@ class Module(nn.Module):
         manda_y = mean_sun_y.expand(B, args.planet)
         manda_z = self.linear_manda(mean_sun_z)
 
-        # phi_2 = self.linear_phi2(torch.ones(B, dtype=torch.float).to(self.device).unsqueeze(1))
-        # theta_2 = self.linear_theta2(t)
-        # radius_2 = self.linear_radius2(torch.ones(B, dtype=torch.float).to(self.device).unsqueeze(1))
-
-        phi_2 = self.linear_phi2(t)
+        phi_2 = self.linear_phi2(torch.ones(B, dtype=torch.float).to(self.device).unsqueeze(1))
         theta_2 = self.linear_theta2(t)
-        radius_2 = self.linear_radius2(t)
+        radius_2 = self.linear_radius2(torch.ones(B, dtype=torch.float).to(self.device).unsqueeze(1))
 
         sighara_x = (radius_2 * torch.sin(phi_2) * torch.cos(theta_2)) + manda_x
         sighara_y = (radius_2 * torch.sin(phi_2) * torch.sin(theta_2)) + manda_y
         sighara_z = (radius_2 * torch.cos(phi_2)) + manda_z
 
         alt, az = self.convert_coordinates(sighara_x, sighara_y, sighara_z)
-        positions = torch.stack([az, alt], dim=-1)
+        positions = torch.stack([alt, az], dim=1)
         return positions.reshape(B,10)
         ### End Model ###
 
@@ -117,6 +113,19 @@ class Module(nn.Module):
 
         return lla
 
+    # def gps_to_ecef_pyproj(self, lat, lon, alt):
+    #     ecef = pyproj.Proj(proj='geocent', ellps='WGS84', datum='WGS84')
+    #     lla = pyproj.Proj(proj='latlong', ellps='WGS84', datum='WGS84')
+    #     x, y, z = pyproj.transform(lla, ecef, lon, lat, alt, radians=False)
+
+    #     return x, y, z
+
+    # def ecef_to_gps_pyproj(self, x,y,z):
+    #     ecef = pyproj.Proj(proj='geocent', ellps='WGS84', datum='WGS84')
+    #     lla = pyproj.Proj(proj='latlong', ellps='WGS84', datum='WGS84')
+    #     lon, lat, alt = pyproj.transform(ecef, lla, x, y, z, radians=False)
+
+    #     return lon, lat, alt 
 
     def bearing(self, lat1, lon1, lat2, lon2):
         y = torch.sin(lon2-lon1) * torch.cos(lat2)
@@ -125,7 +134,23 @@ class Module(nn.Module):
         brng = torch.fmod(theta*180/np.pi + 360, 360)
         return brng
 
+    # def unit_vector(self, vector):
+    #     """ Returns the unit vector of the vector.  """
+    #     # print(vector.shape)
+
+    #     # print(torch.norm(vector, dim=2).shape)
+    #     return torch.div(vector , torch.norm(vector, dim=2).unsqueeze(2).repeat(1, 1, 3))
+
     def angle_between(self, v1, v2):
+        """ Returns the angle in radians between vectors 'v1' and 'v2'::
+
+                >>> angle_between((1, 0, 0), (0, 1, 0))
+                1.5707963267948966
+                >>> angle_between((1, 0, 0), (1, 0, 0))
+                0.0
+                >>> angle_between((1, 0, 0), (-1, 0, 0))
+                3.141592653589793
+        """
         v1_u = torch.div(v1 , torch.norm(v1, dim=1).unsqueeze(1).repeat(1, 3))
         v1_u = v1_u.unsqueeze(1)
         # print(v1_u.shape)
@@ -133,6 +158,9 @@ class Module(nn.Module):
         return torch.arccos(torch.clip(torch.bmm(v1_u, torch.transpose(v2_u, 1, 2)), -1.0, 1.0)).squeeze()
 
     def convert_coordinates(self, x, y, z):
+        # self.args.latitude
+        # self.args.longtitude 
+        # altitude
         x_pos, y_pos, z_pos = self.gps_to_ecef_custom(self.args.latitude, self.args.longtitude, self.args.alt)
         B = x.shape[0]
         b_x = x_pos.expand(B,self.args.planet).to(self.device)
@@ -147,7 +175,10 @@ class Module(nn.Module):
         b = torch.stack([x-b_x, y-b_y, z-b_z], dim=-1)
         altitude = self.angle_between(a, b)
 
+
+        # azimuth
         lon2, lat2, _ = self.ecef2lla(x, y, z)
+        # geodesic = pyproj.Geod(ellps='WGS84')
         lat1 = torch.tensor(self.args.latitude).repeat(B, self.args.planet)
         lon1 = torch.tensor(self.args.longtitude).repeat(B, self.args.planet)
         azimuth = self.bearing(lat1, lon1, lat2, lon2)
@@ -161,15 +192,14 @@ class Module(nn.Module):
         self.writer = SummaryWriter(args.writer) ## Our summary writer, which plots loss over time
         self.fsave = os.path.join(args.dout, 'best.pth') ## The path to the best version of our model
 
-        with open(data, 'r') as file:
-            dataset = json.load(file)
-        dataset = PlanetDataset(dataset, self.args)
-        val1 = int(len(dataset) * 0.8)
-        val2 = len(dataset) - val1
-        train_dataset, valid_dataset = torch.utils.data.random_split(dataset, [val1, val2])
-
+        with open(data['train'], 'r') as file: ## Train data loading
+            train_data = json.load(file)
+        train_dataset = PlanetDataset(train_data, self.args)
         train_dataloader = DataLoader(train_dataset, batch_size=args.batch, shuffle=True, num_workers=args.workers, collate_fn=collate_fn)
 
+        with open(data['valid'], 'r') as file: ## Validation data loading
+            valid_data = json.load(file)
+        valid_dataset = PlanetDataset(valid_data, self.args)
         valid_dataloader = DataLoader(valid_dataset, batch_size=args.batch, shuffle=True, num_workers=args.workers, collate_fn=collate_fn)
 
         optimizer = torch.optim.Adam(list(self.parameters()), lr=args.lr)
@@ -177,7 +207,6 @@ class Module(nn.Module):
         best_loss = 1e10 ## This will hold the best validation loss so we don't overfit to training data
 
         ### Training Loop ###
-        counter = 0
         for epoch in range(args.epoch):
             print('Epoch', epoch)
             train_description = "Epoch " + str(epoch) + ", train"
@@ -188,10 +217,7 @@ class Module(nn.Module):
 
             self.train()
 
-            
-
             for batch in tqdm.tqdm(train_dataloader, desc=train_description):
-                counter+=1
                 optimizer.zero_grad() ## You don't want to accidentally have leftover gradients
 
                 ### Compute loss and update variables ###
@@ -199,8 +225,6 @@ class Module(nn.Module):
 
                 train_size += batch['time'].shape[0] ## Used to normalize loss when plotting
                 train_loss += loss
-
-                self.writer.add_scalar("Loss/BatchTrain", (loss/batch['time'].shape[0]).item(), counter)
 
                 ### Backpropogate ###
                 loss.backward()
@@ -218,7 +242,7 @@ class Module(nn.Module):
             ### Save model if it is better that the previous ###
 
             if valid_loss < best_loss:
-                print( "Obtained a new best validation loss of {:.2f}, saving model checkpoint to {}...".format((valid_loss/valid_size).item(), self.fsave))
+                print( "Obtained a new best validation loss of {:.2f}, saving model checkpoint to {}...".format(valid_loss.item(), self.fsave))
                 torch.save({
                     'model': self.state_dict(),
                     'optim': optimizer.state_dict(),
@@ -238,7 +262,7 @@ class Module(nn.Module):
                 size += batch['time'].shape[0] ## Used to normalize loss when plotting
                 loss += self.compute_loss(batch)
 
-        return loss, size
+        return size, loss
 
     def compute_loss(self, batch):
         batch_size = batch['time'].shape[0]
@@ -246,9 +270,11 @@ class Module(nn.Module):
         ### Move data to GPU if available ###
         times = batch['time'].to(self.device)
         true_positions = batch['pos'].to(self.device)
+        # print(true_positions.shape)
 
         ### Run forward ###
         pred_positions = self.forward(times)
+        # print(pred_positions.shape)
 
         ### Compute loss on results ###
         loss = F.mse_loss(pred_positions, true_positions)

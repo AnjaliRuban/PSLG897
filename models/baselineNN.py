@@ -21,14 +21,19 @@ class Module(nn.Module):
         self.device = torch.device('cuda') if self.args.gpu else torch.device('cpu')
 
         ### Layers Here ###
-        self.linear_theta1 = nn.Linear(1, 1)
-        self.linear_radius1 = nn.Linear(1, 1)
 
-        self.linear_manda = nn.Linear(1, args.planet)
+        self.linear1 = nn.Linear(args.planet, 8)
+        self.linear2 = nn.Linear(8, 16)
+        self.linear3 = nn.Linear(16, args.planet*3)
 
-        self.linear_phi2 = nn.Linear(1, args.planet)
-        self.linear_theta2 = nn.Linear(1, args.planet)
-        self.linear_radius2 = nn.Linear(1, args.planet)
+        # self.linear_theta1 = nn.Linear(1, 1)
+        # self.linear_radius1 = nn.Linear(1, 1)
+
+        # self.linear_manda = nn.Linear(1, 1)
+
+        # self.linear_phi2 = nn.Linear(1, args.planet)
+        # self.linear_theta2 = nn.Linear(1, args.planet)
+        # self.linear_radius2 = nn.Linear(1, args.planet)
         ### End Layers ###
 
         self.to(self.device)
@@ -37,31 +42,19 @@ class Module(nn.Module):
         ### Models Here ###
         args = self.args
         B = t.shape[0]
-        t = t.unsqueeze(1)
-        theta_1 = self.linear_theta1(t) # -> B x 1
-        radius_1 = self.linear_radius1(t) # -> B x 1
+        t = t.repeat(1, args.planet).reshape(B, args.planet)
+        t = t / 1E10
+        # print(t[0,0])
+        positions = self.linear1(t)
+        # print(self.linear1.weight)
+        # print(self.linear1.bias)
+        positions = F.relu(positions)
+        positions = self.linear2(positions)
+        positions = F.relu(positions)
+        positions = self.linear3(positions) 
+        positions = positions.reshape(B, args.planet, 3) * 1E10
+        alt, az = self.convert_coordinates(positions[:,:,0],positions[:,:,1],positions[:,:,2])
 
-        mean_sun_x = torch.sin(theta_1) * radius_1 # -> B x 1
-        mean_sun_y = torch.cos(theta_1) * radius_1 # -> B x 1
-        mean_sun_z = torch.zeros(B, dtype=torch.float).to(self.device).unsqueeze(1) # -> B x 1
-
-        manda_x = mean_sun_x.expand(B, args.planet)
-        manda_y = mean_sun_y.expand(B, args.planet)
-        manda_z = self.linear_manda(mean_sun_z)
-
-        # phi_2 = self.linear_phi2(torch.ones(B, dtype=torch.float).to(self.device).unsqueeze(1))
-        # theta_2 = self.linear_theta2(t)
-        # radius_2 = self.linear_radius2(torch.ones(B, dtype=torch.float).to(self.device).unsqueeze(1))
-
-        phi_2 = self.linear_phi2(t)
-        theta_2 = self.linear_theta2(t)
-        radius_2 = self.linear_radius2(t)
-
-        sighara_x = (radius_2 * torch.sin(phi_2) * torch.cos(theta_2)) + manda_x
-        sighara_y = (radius_2 * torch.sin(phi_2) * torch.sin(theta_2)) + manda_y
-        sighara_z = (radius_2 * torch.cos(phi_2)) + manda_z
-
-        alt, az = self.convert_coordinates(sighara_x, sighara_y, sighara_z)
         positions = torch.stack([az, alt], dim=-1)
         return positions.reshape(B,10)
         ### End Model ###
