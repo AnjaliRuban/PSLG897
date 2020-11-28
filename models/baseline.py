@@ -1,196 +1,245 @@
-
+import os
+import sys
+import random
+import json
+import tqdm
+import torch
+import pyproj
 import numpy as np
-
-def calcPlanetPosition(local_latitude, local_longitude, year, month, day, time, planet):
-
-	print(planet)
-
-	d = 367*year - 7 * (year + (month+9)/12 ) / 4 - 3 * ((year + (month-9)/7 ) / 100 + 1 ) / 4 + 275*month/9 + day - 730515
-	d = d + time / 24.0
-
-	N = 0.0
-	i = 0.0
-	w = 0.0
-	a = 0.0
-	e = 0.0
-	M = 0.0
-	ecl = 23.4393 - 3.563E-7 * d
-
-	sun_N = 0.0
-	sun_i = 0.0
-	sun_w = 282.9404 + 4.70935E-5 * d
-	sun_a = 1.000000
-	sun_e = 0.016709 - 1.151E-9 * d
-	sun_M = 356.0470 + 0.9856002585 * d
-
-	E = M + e*(180/np.pi) * degreeSin(M) * ( 1.0 + e * degreeCos(M) )
-
-	xv = degreeCos(E) - e
-	yv = np.sqrt(1.0 - e*e) * degreeSin(E)
-
-	v = degreeArctan2( yv, xv )
-	rs = np.sqrt( xv*xv + yv*yv )
-
-	lonsun = v + sun_w
+from torch import nn
+from torch.nn import functional as F
+from torch.utils.data import DataLoader
+from tensorboardX import SummaryWriter
+from planet_loader import PlanetDataset, collate_fn
 
 
 
-	sun_Ls = sun_M +sun_w
-	sun_GMST0 = sun_Ls/15 + 12
-	sun_GMST = sun_GMST0 + time
-	sun_LST  = sun_GMST + local_longitude/15
+class Module(nn.Module):
+    def __init__(self, args, saved_model=None):
+        super().__init__()
+        self.args = args
+        self.device = torch.device('cuda') if self.args.gpu else torch.device('cpu')
 
-	if planet == "Mercury":
-	 	N =  48.3313 + 3.24587E-5 * d
-	 	i = 7.0047 + 5.00E-8 * d
-	 	w =  29.1241 + 1.01444E-5 * d
-	 	a = 0.387098
-	 	e = 0.205635 + 5.59E-10 * d
-	 	M = 168.6562 + 4.0923344368 * d
-	elif planet == "Venus":
-		N =  76.6799 + 2.46590E-5 * d
-		i = 3.3946 + 2.75E-8 * d
-		w =  54.8910 + 1.38374E-5 * d
-		a = 0.723330
-		e = 0.006773 - 1.302E-9 * d
-		M =  48.0052 + 1.6021302244 * d
-	elif planet == "Mars":
-		N =  49.5574 + 2.11081E-5 * d
-		i = 1.8497 - 1.78E-8 * d
-		w = 286.5016 + 2.92961E-5 * d
-		a = 1.523688
-		e = 0.093405 + 2.516E-9 * d
-		M =  18.6021 + 0.5240207766 * d
-	elif planet == "Jupiter":
-		N = 100.4542 + 2.76854E-5 * d
-		i = 1.3030 - 1.557E-7 * d
-		w = 273.8777 + 1.64505E-5 * d
-		a = 5.20256
-		e = 0.048498 + 4.469E-9 * d
-		M =  19.8950 + 0.0830853001 * d
-	elif planet == "Saturn":
-		N = 113.6634 + 2.38980E-5 * d
-		i = 2.4886 - 1.081E-7 * d
-		w = 339.3939 + 2.97661E-5 * d
-		a = 9.55475
-		e = 0.055546 - 9.499E-9 * d
-		M = 316.9670 + 0.0334442282 * d
+        if saved_model:
+            self.args = saved_model['args']
 
+        ### Layers Here ###
+        self.linear_1 = nn.Linear(args.planet, 8)
+        self.linear_2 = nn.Linear(8, 16)
+        self.linear_3 = nn.Linear(16, args.planet * 3)
 
-	E = M + e * degreeSin(M) * ( 1.0 + e * degreeCos(M) )
+        if saved_model:
+            self.load_state_dict(saved_model['model'], strict=False)
 
-	if(e > 0.055):
-		E1 = 0.0
-		E0 = E
-		j = 0
-		while E1 - E0 > 0.001 or E0 - E1 > 0.001:
-			if(j != 0):
-				E0 = E1
-			E1 = E0 - ( E0 - e*(180/np.pi) * degreeSin(E0) - M ) / ( 1 - e * degreeCos(E0) )
-			j += 1
-			if j >= 99999:
-				print("NOOOOOOOO TOO MANY ITERATIONS USE OTHER FORMULA SAD")
-				return
-		E = E1
+        ### End Layers ###
 
-	xv = a * ( degreeCos(E) - e )
-	yv = a * ( np.sqrt(1.0 - e*e) * degreeSin(E) )
+        self.to(self.device)
 
-	v = degreeArctan2( yv, xv )
-	r = np.sqrt( xv*xv + yv*yv )
+    def forward(self, t):
+        ### Models Here ###
+        args = self.args
+        B = t.shape[0]
+        t = t.repeat(1, args.planet).reshape(B, args.planet)
+        t = t / 1E10
 
-	xh = r * (degreeCos(N) * degreeCos(v+w) - degreeSin(N) * degreeSin(v+w) * degreeCos(i))
-	yh = r * (degreeSin(N) * degreeCos(v+w) + degreeCos(N) * degreeSin(v+w) * degreeCos(i))
-	zh = r * (degreeSin(v+w) * degreeSin(i) )
+        positions = self.linear_1(t)
+        positions = F.relu(positions)
+        positions = self.linear_2(positions)
+        positions = F.relu(positions)
+        positions = self.linear_3(positions)
+        positions = positions.reshape(B, args.planet, 3) * 1E10
+        alt, az = self.convert_coordinates(positions[:,:,0],positions[:,:,1],positions[:,:,2])
 
-	lonecl = degreeArctan2( yh, xh )
-	latecl = degreeArctan2( zh, np.sqrt(xh*xh+yh*yh) )
+        positions = torch.stack([az, alt], dim=-1)
+        positions = positions.reshape(B, args.planet * 2)
+        return positions
+        ### End Model ###
 
-	if planet == "Jupiter":
-		Ms = 316.9670 + 0.0334442282 * d
-		Mj = M
-		lonecl -= 0.332 * degreeSin(2*Mj - 5*Ms - 67.6)
-		lonecl -= 0.056 * degreeSin(2*Mj - 2*Ms + 21)
-		lonecl += 0.042 * degreeSin(3*Mj - 5*Ms + 21)
-		lonecl -= 0.036 * degreeSin(Mj - 2*Ms)
-		lonecl += 0.022 * degreeCos(Mj - Ms)
-		lonecl += 0.023 * degreeSin(2*Mj - 3*Ms + 52)
-		lonecl -= 0.016 * degreeSin(Mj - 5*Ms - 69)
+    def gps_to_ecef_custom(self, lat, lon, alt):
+        rad_lat = lat * torch.tensor(np.pi / 180.0).to(self.device)
+        rad_lon = lon * torch.tensor(np.pi / 180.0).to(self.device)
 
-	if planet == "Saturn":
-		Mj = 19.8950 + 0.0830853001 * d
-		Ms = M
-		lonecl += 0.812 * degreeSin(2*Mj - 5*Ms - 67.6)
-		lonecl -= 0.229 * degreeCos(2*Mj - 4*Ms - 2)
-		lonecl += 0.119 * degreeSin(Mj - 2*Ms - 3)
-		lonecl += 0.046 * degreeSin(2*Mj - 6*Ms - 69)
-		lonecl += 0.014 * degreeSin(Mj - 3*Ms + 32)
+        a = torch.tensor(6378137, dtype=torch.float).to(self.device)
+        finv = 298.257223563
+        f = 1 / finv
+        e2 = 1 - (1 - f) * (1 - f)
+        e2 =  torch.tensor(e2, dtype=torch.float).to(self.device)
+        v = torch.div(a, torch.sqrt(1 - e2 * torch.sin(rad_lat) * torch.sin(rad_lat)))
 
-		latecl -= 0.020 * degreeCos(2*Mj - 4*Ms - 2)
-		latecl += 0.018 * degreeSin(2*Mj - 6*Ms - 49)
+        x = (v + alt) * torch.cos(rad_lat) * torch.cos(rad_lon)
+        y = (v + alt) * torch.cos(rad_lat) * torch.sin(rad_lon)
+        z = (v * (1 - e2) + alt) * torch.sin(rad_lat)
 
-	xh = r * degreeCos(lonecl) * degreeCos(latecl)
-	yh = r * degreeSin(lonecl) * degreeCos(latecl)
-	zh = r * degreeSin(latecl)
-
-	xs = rs * degreeCos(lonsun)
-	ys = rs * degreeSin(lonsun)
-
-	xg = xh + xs
-	yg = yh + ys
-	zg = zh
-
-	xe = xg
-	ye = yg * degreeCos(ecl) - zg * degreeSin(ecl)
-	ze = yg * degreeSin(ecl) + zg * degreeCos(ecl)
-
-	RA  = degreeArctan2( ye, xe )
-	Decl = degreeArctan2( ze, np.sqrt(xe*xe+ye*ye) )
-
-	HA = sun_LST - RA
-
-	x = degreeCos(HA) * degreeCos(Decl)
-	y = degreeSin(HA) * degreeCos(Decl)
-	z = degreeSin(Decl)
-
-	xhor = x * degreeSin(local_latitude) - z * degreeCos(local_latitude)
-	yhor = y
-	zhor = x * degreeCos(local_latitude) + z * degreeSin(local_latitude)
-
-	az  = degreeArctan2( yhor, xhor ) + 180
-	alt = degreeArctan2( zhor, np.sqrt(xhor*xhor+yhor*yhor) )
-
-	print(az)
-	print(alt)
-	return az, alt
-
-
-def degreeCos(deg):
-	return np.cos(np.deg2rad(deg))
-
-def degreeSin(deg):
-	return np.sin(np.deg2rad(deg))
-
-def degreeArctan2(val1, val2):
-	return np.rad2deg(np.arctan2(val1, val2))
+        return x, y, z
 
 
 
-if __name__=="__main__": 
-    calcPlanetPosition(20.5937, 78.9629, 496, 1, 1, 0, "Jupiter")
+    def ecef2lla(self, x, y, z) :
+        B = x.shape[0]
+        a = torch.tensor(6378137, dtype=torch.float).to(self.device)
+        f = torch.tensor(0.0034, dtype=torch.float).to(self.device)
+        b = torch.tensor(6.3568e6, dtype=torch.float).to(self.device)
+        e = torch.sqrt(torch.div(torch.pow(a, 2) - torch.pow(b, 2) , torch.pow(a, 2)))
+        e2 = torch.sqrt(torch.div(torch.pow(a, 2) - torch.pow(b, 2) , torch.pow(b, 2)))
+
+        lla = torch.zeros(3, B, self.args.planet).to(self.device)
+
+        p = torch.sqrt(torch.pow(x, 2) + torch.pow(y, 2))
+
+        theta = torch.arctan(torch.div((z * a), (p * b)))
+
+        lon = torch.arctan(torch.div(y, x))
+
+        first = z + torch.pow(e2, 2) * b * torch.pow(torch.sin(theta), 3)
+        second = p - torch.pow(e, 2) * a * torch.pow(torch.cos(theta), 3)
+        lat = torch.arctan(torch.div(first, second))
+        N = torch.div(a, (torch.sqrt(1 - (torch.pow(e, 2) * torch.pow(torch.sin(lat), 2)))))
+
+        m = torch.div(p, torch.cos(lat))
+        height = m - N
+
+        lon = torch.div(lon * 180, torch.tensor(np.pi)).to(self.device)
+        lat = torch.div(lat * 180, torch.tensor(np.pi)).to(self.device)
+        lla[0] = lat
+        lla[1] = lon
+        lla[2] = height
+
+        return lla
+
+
+    def bearing(self, lat1, lon1, lat2, lon2):
+        y = torch.sin(lon2-lon1) * torch.cos(lat2)
+        x = torch.cos(lat1)*torch.sin(lat2) - torch.sin(lat1)*torch.cos(lat2)*torch.cos(lon2-lon1)
+        theta = torch.atan2(y, x)
+        brng = torch.fmod(theta*180/np.pi + 360, 360)
+        return brng
+
+    def angle_between(self, v1, v2):
+        v1_u = torch.div(v1 , torch.norm(v1, dim=1).unsqueeze(1).repeat(1, 3))
+        v1_u = v1_u.unsqueeze(1)
+        # print(v1_u.shape)
+        v2_u = torch.div(v2 , torch.norm(v2, dim=2).unsqueeze(2).repeat(1, 1, 3))
+        return torch.arccos(torch.clip(torch.bmm(v1_u, torch.transpose(v2_u, 1, 2)), -1.0, 1.0)).squeeze()
+
+    def convert_coordinates(self, x, y, z):
+        x_pos, y_pos, z_pos = self.gps_to_ecef_custom(self.args.latitude, self.args.longtitude, self.args.alt)
+        B = x.shape[0]
+        b_x = x_pos.expand(B,self.args.planet).to(self.device)
+        b_y = y_pos.expand(B,self.args.planet).to(self.device)
+        b_z = z_pos.expand(B,self.args.planet).to(self.device)
+
+        a_x = x_pos.expand(B).to(self.device)
+        a_y = y_pos.expand(B).to(self.device)
+        a_z = z_pos.expand(B).to(self.device)
+
+        a = torch.stack([a_x, a_y, a_z], dim=-1)
+        b = torch.stack([x-b_x, y-b_y, z-b_z], dim=-1)
+        altitude = self.angle_between(a, b)
+
+        lon2, lat2, _ = self.ecef2lla(x, y, z)
+        lat1 = torch.tensor(self.args.latitude).repeat(B, self.args.planet)
+        lon1 = torch.tensor(self.args.longtitude).repeat(B, self.args.planet)
+        azimuth = self.bearing(lat1, lon1, lat2, lon2)
+
+
+        return altitude, azimuth
+
+    def run_train(self, data):
+        ### Setup ###
+        args = self.args
+        self.writer = SummaryWriter(args.writer) ## Our summary writer, which plots loss over time
+        self.fsave = os.path.join(args.dout) ## The path to the best version of our model
+
+        with open(data, 'r') as file:
+            dataset = json.load(file)
+        dataset = PlanetDataset(dataset, self.args)
+        train_size = int(len(dataset) * 0.8)
+        valid_size = len(dataset) - val1
+        train_dataset, valid_dataset = torch.utils.data.random_split(dataset, [train_size, valid_size])
+
+        train_dataloader = DataLoader(train_dataset, batch_size=args.batch, shuffle=True, num_workers=args.workers, collate_fn=collate_fn)
+        valid_dataloader = DataLoader(valid_dataset, batch_size=args.batch, shuffle=True, num_workers=args.workers, collate_fn=collate_fn)
+
+        optimizer = torch.optim.Adam(list(self.parameters()), lr=args.lr)
+
+        best_loss = 1e10 ## This will hold the best validation loss so we don't overfit to training data
+
+        ### Training Loop ###
+        batch_idx = 0
+        for epoch in range(args.epoch):
+            print('Epoch', epoch)
+            train_description = "Epoch " + str(epoch) + ", train"
+            valid_description = "Epoch " + str(epoch) + ", valid"
+
+            train_loss = torch.tensor(0, dtype=torch.float)
+            train_size = torch.tensor(0, dtype=torch.float)
+
+            self.train()
 
 
 
+            for batch in tqdm.tqdm(train_dataloader, desc=train_description):
+                batch_idx+=1
+                optimizer.zero_grad() ## You don't want to accidentally have leftover gradients
+
+                ### Compute loss and update variables ###
+                loss = self.compute_loss(batch)
+
+                train_size += batch['time'].shape[0] ## Used to normalize loss when plotting
+                train_loss += loss
+
+                self.writer.add_scalar("Loss/BatchTrain", (loss/batch['time'].shape[0]).item(), batch_idx)
+
+                ### Backpropogate ###
+                loss.backward()
+                optimizer.step()
+                torch.cuda.empty_cache()
+
+            ### Run validation loop ###
+            valid_loss, valid_size = self.run_eval(valid_dataloader, valid_description)
+
+            ### Write to SummaryWriter ###
+            self.writer.add_scalar("Loss/Train", (train_loss/train_size).item(), epoch)
+            self.writer.add_scalar("Loss/Valid", (valid_loss/valid_size).item(), epoch)
+            self.writer.flush()
+
+            ### Save model if it is better that the previous ###
+
+            if valid_loss < best_loss:
+                print( "Obtained a new best validation loss of {:.2f}, saving model checkpoint to {}...".format((valid_loss/valid_size).item(), self.fsave))
+                torch.save({
+                    'model': self.state_dict(),
+                    'optim': optimizer.state_dict(),
+                    'args': self.args
+                }, self.fsave)
+                best_loss = valid_loss
+
+        self.writer.close()
+
+    def evaluate(self, data):
+        self.eval()
+        with open(data, 'r') as file:
+            dataset = json.load(file)
+        dataset = PlanetDataset(dataset, self.args)
+        dataloader = DataLoader(dataset, batch_size=args.batch, shuffle=True, num_workers=args.workers, collate_fn=collate_fn)
+        description = "Evaluating..."
+        with torch.no_grad():
+            for batch in tqdm.tqdm(dataloader, desc=description):
+                size += batch['time'].shape[0] ## Used to normalize loss when plotting
+                loss += self.compute_loss(batch)
+        return (loss / size).item()
 
 
+    def compute_loss(self, batch):
+        batch_size = batch['time'].shape[0]
 
+        ### Move data to GPU if available ###
+        times = batch['time'].to(self.device)
+        true_positions = batch['pos'].to(self.device)
 
+        ### Run forward ###
+        pred_positions = self.forward(times)
 
-
-
-	
-
-
-
-
-
+        ### Compute loss on results ###
+        loss = F.mse_loss(pred_positions, true_positions, reduction='sum')
+        return loss

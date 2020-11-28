@@ -13,10 +13,12 @@ if __name__ == '__main__':
     parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
 
     ### Add settings to parser ###
-    parser.add_argument('--data', help='The json file that contains your data', default='aryabata.json')
+    parser.add_argument('--data', help='The json file that contains your data', default='{model}.json')
     parser.add_argument('--model', help='Which model to run', default='aryabhata')
-    parser.add_argument('--dout', help='Location where your model saves to', default='exp/model:{model}')
-    parser.add_argument('--writer', help='Location where your model plot writes to', default='runs/model:{model}')
+    parser.add_argument('--dout', help='Location where your model saves to', default='exp/{model}/{model}_s{seed}.pth')
+    parser.add_argument('--writer', help='Location where your model plot writes to', default='runs/{model}/{model}_s{seed}')
+    parser.add_argument('--eval', help='Whether to run eval', action='store_true')
+    parser.add_argument('--saved_model', help='Location of model to load', default=None)
 
 
     parser.add_argument('--gpu', help='Use gpu', action='store_true')
@@ -34,6 +36,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     args.dout = args.dout.format(**vars(args))
     args.writer = args.writer.format(**vars(args))
+    args.data = args.data.format(**vars(args))
 
     ### Make directory to store model ###
     if not os.path.isdir(args.dout):
@@ -44,18 +47,13 @@ if __name__ == '__main__':
 
     ### Import selected model ###
     M = import_module('models.{}'.format(args.model))
-    
+
     data = os.path.join("data/" + args.data)
 
-    # data = {
-    #     'train': os.path.join(args.data, 'aryabata.json'),
-    #     'valid': os.path.join(args.data, 'aryabata_validation.json')
-    # }
-    # data = {
-    #     'train': os.path.join(args.data, 'train.json'),
-    #     'valid': os.path.join(args.data, 'valid.json')
-    # }
-
     ### Load and run selected model ###
-    model = M.Module(args)
-    model.run_train(data)
+    model = M.Module(args, args.saved_model)
+    if args.eval:
+        loss = model.evaluate(data)
+        print("Final evaluation loss: " + str(loss))
+    else:
+        model.run_train(data)

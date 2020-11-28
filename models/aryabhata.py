@@ -15,10 +15,13 @@ from planet_loader import PlanetDataset, collate_fn
 
 
 class Module(nn.Module):
-    def __init__(self, args):
+    def __init__(self, args, saved_model=None):
         super().__init__()
         self.args = args
         self.device = torch.device('cuda') if self.args.gpu else torch.device('cpu')
+
+        if saved_model:
+            self.args = saved_model['args']
 
         ### Layers Here ###
         self.linear_theta1 = nn.Linear(1, 1)
@@ -29,6 +32,9 @@ class Module(nn.Module):
         self.linear_phi2 = nn.Linear(1, args.planet)
         self.linear_theta2 = nn.Linear(1, args.planet)
         self.linear_radius2 = nn.Linear(1, args.planet)
+
+        if saved_model:
+            self.load_state_dict(saved_model['model'], strict=False)
         ### End Layers ###
 
         self.to(self.device)
@@ -63,7 +69,8 @@ class Module(nn.Module):
 
         alt, az = self.convert_coordinates(sighara_x, sighara_y, sighara_z)
         positions = torch.stack([az, alt], dim=-1)
-        return positions.reshape(B,10)
+        positions = positions.reshape(B, args.planet * 2)
+        return positions
         ### End Model ###
 
     def gps_to_ecef_custom(self, lat, lon, alt):
@@ -83,7 +90,7 @@ class Module(nn.Module):
 
         return x, y, z
 
-    
+
 
     def ecef2lla(self, x, y, z) :
         B = x.shape[0]
@@ -94,7 +101,7 @@ class Module(nn.Module):
         e2 = torch.sqrt(torch.div(torch.pow(a, 2) - torch.pow(b, 2) , torch.pow(b, 2)))
 
         lla = torch.zeros(3, B, self.args.planet).to(self.device)
-        
+
         p = torch.sqrt(torch.pow(x, 2) + torch.pow(y, 2))
 
         theta = torch.arctan(torch.div((z * a), (p * b)))
@@ -159,17 +166,16 @@ class Module(nn.Module):
         ### Setup ###
         args = self.args
         self.writer = SummaryWriter(args.writer) ## Our summary writer, which plots loss over time
-        self.fsave = os.path.join(args.dout, 'best.pth') ## The path to the best version of our model
+        self.fsave = os.path.join(args.dout) ## The path to the best version of our model
 
         with open(data, 'r') as file:
             dataset = json.load(file)
         dataset = PlanetDataset(dataset, self.args)
-        val1 = int(len(dataset) * 0.8)
-        val2 = len(dataset) - val1
-        train_dataset, valid_dataset = torch.utils.data.random_split(dataset, [val1, val2])
+        train_size = int(len(dataset) * 0.8)
+        valid_size = len(dataset) - val1
+        train_dataset, valid_dataset = torch.utils.data.random_split(dataset, [train_size, valid_size])
 
         train_dataloader = DataLoader(train_dataset, batch_size=args.batch, shuffle=True, num_workers=args.workers, collate_fn=collate_fn)
-
         valid_dataloader = DataLoader(valid_dataset, batch_size=args.batch, shuffle=True, num_workers=args.workers, collate_fn=collate_fn)
 
         optimizer = torch.optim.Adam(list(self.parameters()), lr=args.lr)
@@ -177,7 +183,7 @@ class Module(nn.Module):
         best_loss = 1e10 ## This will hold the best validation loss so we don't overfit to training data
 
         ### Training Loop ###
-        counter = 0
+        batch_idx = 0
         for epoch in range(args.epoch):
             print('Epoch', epoch)
             train_description = "Epoch " + str(epoch) + ", train"
@@ -188,10 +194,8 @@ class Module(nn.Module):
 
             self.train()
 
-            
-
             for batch in tqdm.tqdm(train_dataloader, desc=train_description):
-                counter+=1
+                batch_idx+=1
                 optimizer.zero_grad() ## You don't want to accidentally have leftover gradients
 
                 ### Compute loss and update variables ###
@@ -200,7 +204,7 @@ class Module(nn.Module):
                 train_size += batch['time'].shape[0] ## Used to normalize loss when plotting
                 train_loss += loss
 
-                self.writer.add_scalar("Loss/BatchTrain", (loss/batch['time'].shape[0]).item(), counter)
+                self.writer.add_scalar("Loss/BatchTrain", (loss/batch['time'].shape[0]).item(), batch_idx)
 
                 ### Backpropogate ###
                 loss.backward()
@@ -228,17 +232,19 @@ class Module(nn.Module):
 
         self.writer.close()
 
-    def run_eval(self, valid_dataloader, valid_description):
+    def evaluate(self, data):
         self.eval()
-        loss = torch.tensor(0, dtype=torch.float)
-        size = torch.tensor(0, dtype=torch.float)
-
+        with open(data, 'r') as file:
+            dataset = json.load(file)
+        dataset = PlanetDataset(dataset, self.args)
+        dataloader = DataLoader(dataset, batch_size=args.batch, shuffle=True, num_workers=args.workers, collate_fn=collate_fn)
+        description = "Evaluating..."
         with torch.no_grad():
-            for batch in tqdm.tqdm(valid_dataloader, desc=valid_description):
+            for batch in tqdm.tqdm(dataloader, desc=description):
                 size += batch['time'].shape[0] ## Used to normalize loss when plotting
                 loss += self.compute_loss(batch)
+        return (loss / size).item()
 
-        return loss, size
 
     def compute_loss(self, batch):
         batch_size = batch['time'].shape[0]
@@ -251,8 +257,5 @@ class Module(nn.Module):
         pred_positions = self.forward(times)
 
         ### Compute loss on results ###
-        loss = F.mse_loss(pred_positions, true_positions)
-
+        loss = F.mse_loss(pred_positions, true_positions, reduction='sum')
         return loss
-
-
