@@ -43,7 +43,7 @@ class Module(nn.Module):
         ### Models Here ###
         args = self.args
         B = t.shape[0]
-        t = t.unsqueeze(1)
+        t = t.unsqueeze(1) / 1E14
         theta_1 = self.linear_theta1(t) # -> B x 1
         radius_1 = self.linear_radius1(t) # -> B x 1
 
@@ -67,7 +67,7 @@ class Module(nn.Module):
         sighara_y = (radius_2 * torch.sin(phi_2) * torch.sin(theta_2)) + manda_y
         sighara_z = (radius_2 * torch.cos(phi_2)) + manda_z
 
-        alt, az = self.convert_coordinates(sighara_x, sighara_y, sighara_z)
+        alt, az = self.convert_coordinates(sighara_x * 1E14, sighara_y * 1E14, sighara_z * 1E14)
         positions = torch.stack([az, alt], dim=-1)
         positions = positions.reshape(B, args.planet * 2)
         return positions
@@ -135,9 +135,8 @@ class Module(nn.Module):
     def angle_between(self, v1, v2):
         v1_u = torch.div(v1 , torch.norm(v1, dim=1).unsqueeze(1).repeat(1, 3))
         v1_u = v1_u.unsqueeze(1)
-        # print(v1_u.shape)
         v2_u = torch.div(v2 , torch.norm(v2, dim=2).unsqueeze(2).repeat(1, 1, 3))
-        return torch.arccos(torch.clip(torch.bmm(v1_u, torch.transpose(v2_u, 1, 2)), -1.0, 1.0)).squeeze()
+        return torch.arccos(torch.clip(torch.bmm(v1_u, torch.transpose(v2_u, 1, 2)), -1.0, 1.0)).squeeze(1)
 
     def convert_coordinates(self, x, y, z):
         x_pos, y_pos, z_pos = self.gps_to_ecef_custom(self.args.latitude, self.args.longtitude, self.args.alt)
@@ -172,7 +171,7 @@ class Module(nn.Module):
             dataset = json.load(file)
         dataset = PlanetDataset(dataset, self.args)
         train_size = int(len(dataset) * 0.8)
-        valid_size = len(dataset) - val1
+        valid_size = len(dataset) - train_size
         train_dataset, valid_dataset = torch.utils.data.random_split(dataset, [train_size, valid_size])
 
         train_dataloader = DataLoader(train_dataset, batch_size=args.batch, shuffle=True, num_workers=args.workers, collate_fn=collate_fn)
@@ -231,6 +230,18 @@ class Module(nn.Module):
                 best_loss = valid_loss
 
         self.writer.close()
+
+    def run_eval(self, valid_dataloader, valid_description):
+        self.eval()
+        loss = torch.tensor(0, dtype=torch.float)
+        size = torch.tensor(0, dtype=torch.float)
+
+        with torch.no_grad():
+            for batch in tqdm.tqdm(valid_dataloader, desc=valid_description):
+                size += batch['time'].shape[0] ## Used to normalize loss when plotting
+                loss += self.compute_loss(batch)
+
+        return loss, size
 
     def evaluate(self, data):
         self.eval()

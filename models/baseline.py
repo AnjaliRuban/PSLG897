@@ -40,8 +40,6 @@ class Module(nn.Module):
         args = self.args
         B = t.shape[0]
         t = t.repeat(1, args.planet).reshape(B, args.planet)
-        t = t / 1E10
-
         positions = self.linear_1(t)
         positions = F.relu(positions)
         positions = self.linear_2(positions)
@@ -154,7 +152,7 @@ class Module(nn.Module):
             dataset = json.load(file)
         dataset = PlanetDataset(dataset, self.args)
         train_size = int(len(dataset) * 0.8)
-        valid_size = len(dataset) - val1
+        valid_size = len(dataset) - train_size
         train_dataset, valid_dataset = torch.utils.data.random_split(dataset, [train_size, valid_size])
 
         train_dataloader = DataLoader(train_dataset, batch_size=args.batch, shuffle=True, num_workers=args.workers, collate_fn=collate_fn)
@@ -216,6 +214,18 @@ class Module(nn.Module):
 
         self.writer.close()
 
+    def run_eval(self, valid_dataloader, valid_description):
+        self.eval()
+        loss = torch.tensor(0, dtype=torch.float)
+        size = torch.tensor(0, dtype=torch.float)
+
+        with torch.no_grad():
+            for batch in tqdm.tqdm(valid_dataloader, desc=valid_description):
+                size += batch['time'].shape[0] ## Used to normalize loss when plotting
+                loss += self.compute_loss(batch)
+
+        return loss, size
+
     def evaluate(self, data):
         self.eval()
         with open(data, 'r') as file:
@@ -242,4 +252,5 @@ class Module(nn.Module):
 
         ### Compute loss on results ###
         loss = F.mse_loss(pred_positions, true_positions, reduction='sum')
+
         return loss

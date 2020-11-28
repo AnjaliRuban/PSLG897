@@ -15,7 +15,7 @@ from planet_loader import PlanetDataset, collate_fn
 
 
 class Module(nn.Module):
-    def __init__(self, args):
+    def __init__(self, args, saved_model=None):
         super().__init__()
         self.args = args
         self.device = torch.device('cuda') if self.args.gpu else torch.device('cpu')
@@ -43,7 +43,7 @@ class Module(nn.Module):
         ### Models Here ###
         args = self.args
         B = t.shape[0]
-        t = t.unsqueeze(1)
+        t = t.unsqueeze(1) / 1E14
         theta_1 = self.linear_theta1(t) # -> B x 1
         radius_1 = self.linear_radius1(t) # -> B x 1
 
@@ -67,7 +67,7 @@ class Module(nn.Module):
         sighara_y = (radius_2 * torch.sin(phi_2) * torch.sin(theta_2)) + manda_y
         sighara_z = (radius_2 * torch.cos(phi_2)) + manda_z
 
-        alt, az = self.convert_coordinates(sighara_x, sighara_y, sighara_z)
+        alt, az = self.convert_coordinates(sighara_x * 1E14, sighara_y * 1E14, sighara_z * 1E14)
         positions = torch.stack([az, alt], dim=-1)
         positions = positions.reshape(B, args.planet * 2)
         return positions
@@ -170,7 +170,7 @@ class Module(nn.Module):
             dataset = json.load(file)
         dataset = PlanetDataset(dataset, self.args)
         train_size = int(len(dataset) * 0.8)
-        valid_size = len(dataset) - val1
+        valid_size = len(dataset) - train_size
         train_dataset, valid_dataset = torch.utils.data.random_split(dataset, [train_size, valid_size])
 
         train_dataloader = DataLoader(train_dataset, batch_size=args.batch, shuffle=True, num_workers=args.workers, collate_fn=collate_fn)
