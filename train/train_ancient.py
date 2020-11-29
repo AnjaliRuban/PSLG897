@@ -25,9 +25,9 @@ if __name__ == '__main__':
     parser.add_argument('--gpu', help='Use gpu', action='store_true')
     parser.add_argument('--workers', help='Number of workers for each dataloader', default=8, type=int)
     parser.add_argument('--planet', help='Number of planets', default=5, type=int)
-    parser.add_argument('--epoch', help='Number of epochs', default=100, type=int)
+    parser.add_argument('--epoch', help='Number of epochs', default=40, type=int)
     parser.add_argument('--batch', help='Size of batches', default=512, type=int)
-    parser.add_argument('--lr', help='optimizer learning rate', default=1e-4, type=float)
+    parser.add_argument('--lr', help='optimizer learning rate', default=1e-5, type=float)
     parser.add_argument('--latitude', help='latitude', default=78.9629, type=float)
     parser.add_argument('--longtitude', help='longtitude', default=20.5937, type=float)
     parser.add_argument('--alt', help='alt', default=0, type=float)
@@ -53,9 +53,11 @@ if __name__ == '__main__':
     data = os.path.join("data/" + args.data + ".json")
 
     ### Load and run selected model ###
-    model = M.Module(args, args.saved_model)
     if args.eval:
+        saved_model = torch.load(args.saved_model)
+        model = M.Module(args, saved_model)
         loss = model.evaluate(data)
         print("Final evaluation loss: " + str(loss))
     else:
+        model = M.Module(args)
         model.run_train(data)

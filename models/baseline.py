@@ -39,7 +39,7 @@ class Module(nn.Module):
         ### Models Here ###
         args = self.args
         B = t.shape[0]
-        t = t.repeat(1, args.planet).reshape(B, args.planet)
+        t = t.repeat(1, args.planet).reshape(B, args.planet) / 1E10
         positions = self.linear_1(t)
         positions = F.relu(positions)
         positions = self.linear_2(positions)

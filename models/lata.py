@@ -24,13 +24,13 @@ class Module(nn.Module):
             self.args = saved_model['args']
 
         ### Layers Here ###
-        self.linear_theta1 = nn.Linear(1, args.planet)
-        self.linear_radius1 = nn.Linear(1, args.planet)
+        self.linear_theta1 = nn.Linear(args.planet, args.planet)
+        self.linear_radius1 = nn.Linear(args.planet, args.planet)
 
         self.linear_manda = nn.Linear(args.planet, args.planet)
 
         self.linear_phi2 = nn.Linear(1, args.planet)
-        self.linear_theta2 = nn.Linear(1, args.planet)
+        self.linear_theta2 = nn.Linear(args.planet, args.planet)
         self.linear_radius2 = nn.Linear(1, args.planet)
 
         ### End Layers ###
@@ -43,7 +43,7 @@ class Module(nn.Module):
         ### Models Here ###
         args = self.args
         B = t.shape[0]
-        t = t.unsqueeze(1) / 1E14
+        # t = t.unsqueeze(1) / 1E14
         theta_1 = self.linear_theta1(t) # -> B x 1
         radius_1 = self.linear_radius1(t) # -> B x 1
 
@@ -55,13 +55,13 @@ class Module(nn.Module):
         manda_y = mean_sun_y
         manda_z = self.linear_manda(mean_sun_z)
 
-        # phi_2 = self.linear_phi2(torch.ones(B, dtype=torch.float).to(self.device).unsqueeze(1))
-        # theta_2 = self.linear_theta2(t)
-        # radius_2 = self.linear_radius2(torch.ones(B, dtype=torch.float).to(self.device).unsqueeze(1))
-
-        phi_2 = self.linear_phi2(t)
+        phi_2 = self.linear_phi2(torch.ones(B, dtype=torch.float).to(self.device).unsqueeze(1))
         theta_2 = self.linear_theta2(t)
-        radius_2 = self.linear_radius2(t)
+        radius_2 = self.linear_radius2(torch.ones(B, dtype=torch.float).to(self.device).unsqueeze(1))
+
+        # phi_2 = self.linear_phi2(t)
+        # theta_2 = self.linear_theta2(t)
+        # radius_2 = self.linear_radius2(t)
 
         sighara_x = (radius_2 * torch.sin(phi_2) * torch.cos(theta_2)) + manda_x
         sighara_y = (radius_2 * torch.sin(phi_2) * torch.sin(theta_2)) + manda_y
@@ -69,7 +69,7 @@ class Module(nn.Module):
 
         alt, az = self.convert_coordinates(sighara_x * 1E14, sighara_y * 1E14, sighara_z * 1E14)
         positions = torch.stack([az, alt], dim=-1)
-        positions = positions.reshape(B, args.planet * 2)
+        # positions = positions.reshape(B, args.planet * 2)
         return positions
         ### End Model ###
 
@@ -246,16 +246,59 @@ class Module(nn.Module):
 
     def evaluate(self, data):
         self.eval()
+        args = self.args
         with open(data, 'r') as file:
             dataset = json.load(file)
         dataset = PlanetDataset(dataset, self.args)
         dataloader = DataLoader(dataset, batch_size=args.batch, shuffle=True, num_workers=args.workers, collate_fn=collate_fn)
         description = "Evaluating..."
+
+        loss = [torch.tensor(0, dtype=torch.float) for i in range(self.args.planet)]
+        size = torch.tensor(0, dtype=torch.float)
+
         with torch.no_grad():
             for batch in tqdm.tqdm(dataloader, desc=description):
+                batch_size = batch['time'].shape[0]
+
+                ### Move data to GPU if available ###
+                times = batch['time'].to(self.device)
+                planet_times = batch['planet_times'].to(self.device)
+                true_positions = batch['pos'].to(self.device)
+
+                ### Run forward ###
+                pred_positions = self.forward(planet_times)
+
+                true = []
+                pred = []
+                true_az_sin = torch.sin(torch.deg2rad(true_position[:, :, 0]))
+                true_az_cos = torch.cos(torch.deg2rad(true_position[:, :, 0]))
+                true_alt_sin = torch.sin(torch.deg2rad(true_position[:, :, 1]))
+                true_alt_cos = torch.cos(torch.deg2rad(true_position[:, :, 1]))
+
+                pred_az_sin = torch.sin(torch.deg2rad(pred_position[:, :, 0]))
+                pred_az_cos = torch.cos(torch.deg2rad(pred_position[:, :, 0]))
+                pred_alt_sin = torch.sin(torch.deg2rad(pred_position[:, :, 1]))
+                pred_alt_cos = torch.cos(torch.deg2rad(pred_position[:, :, 1]))
+
+                true_positions = torch.stack([true_az_sin, true_az_cos, true_alt_sin, true_alt_cos], dim=2)
+                pred_positions = torch.stack([pred_az_sin, pred_az_cos, pred_alt_sin, pred_alt_cos], dim=2)
+
+                print("Actual")
+                print(true_positions[0])
+                print("Predicted")
+                print(pred_positions[0])
+                print("")
+
+                pred_positions_by_planet = [pred_positions[:, 2 * i : 2 * i + 2]  for i in range(args.planet)]
+                true_positions_by_planet = [true_positions[:, 2 * i : 2 * i + 2]  for i in range(args.planet)]
+
+
+                loss_by_planet = [F.mse_loss(pred_positions_by_planet[i], true_positions_by_planet[i], reduction='sum') for i in range(self.args.planet)]
+
                 size += batch['time'].shape[0] ## Used to normalize loss when plotting
-                loss += self.compute_loss(batch)
-        return (loss / size).item()
+                loss = [loss_by_planet[i] + loss[i] for i in range(self.args.planet)]
+
+        return [(loss[i] / size).item() for i in range(self.args.planet)]
 
 
     def compute_loss(self, batch):
@@ -263,10 +306,26 @@ class Module(nn.Module):
 
         ### Move data to GPU if available ###
         times = batch['time'].to(self.device)
-        true_positions = batch['pos'].to(self.device)
+        planet_times = batch['planet_times'].to(self.device)
+        true_position = batch['pos'].to(self.device)
 
         ### Run forward ###
-        pred_positions = self.forward(times)
+        pred_position = self.forward(planet_times)
+
+        true = []
+        pred = []
+        true_az_sin = torch.sin(torch.deg2rad(true_position[:, :, 0]))
+        true_az_cos = torch.cos(torch.deg2rad(true_position[:, :, 0]))
+        true_alt_sin = torch.sin(torch.deg2rad(true_position[:, :, 1]))
+        true_alt_cos = torch.cos(torch.deg2rad(true_position[:, :, 1]))
+
+        pred_az_sin = torch.sin(torch.deg2rad(pred_position[:, :, 0]))
+        pred_az_cos = torch.cos(torch.deg2rad(pred_position[:, :, 0]))
+        pred_alt_sin = torch.sin(torch.deg2rad(pred_position[:, :, 1]))
+        pred_alt_cos = torch.cos(torch.deg2rad(pred_position[:, :, 1]))
+
+        true_positions = torch.stack([true_az_sin, true_az_cos, true_alt_sin, true_alt_cos], dim=2)
+        pred_positions = torch.stack([pred_az_sin, pred_az_cos, pred_alt_sin, pred_alt_cos], dim=2)
 
         ### Compute loss on results ###
         loss = F.mse_loss(pred_positions, true_positions, reduction='sum')
