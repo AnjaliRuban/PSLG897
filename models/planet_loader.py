@@ -36,7 +36,7 @@ class PlanetDataset(Dataset):
         # real_time = (365.25) + 30.44 * int(time[5:7]) + int(time[8:10])
         positions = []
         planet_times = []
-        for planet in item['planet_data'].keys():
+        for planet in sorted(item['planet_data'].keys()):
             az = item['planet_data'][planet]['az']
             alt = item['planet_data'][planet]['alt']
             positions.append([az, alt])

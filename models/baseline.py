@@ -39,36 +39,44 @@ class Module(nn.Module):
         ### Models Here ###
         args = self.args
         B = t.shape[0]
-        t = t.repeat(1, args.planet).reshape(B, args.planet) / 1E10
+        t = t.repeat(1, args.planet).reshape(B, args.planet)
         positions = self.linear_1(t)
         positions = F.relu(positions)
         positions = self.linear_2(positions)
         positions = F.relu(positions)
         positions = self.linear_3(positions)
-        positions = positions.reshape(B, args.planet, 3) * 1E10
+        positions = positions.reshape(B, args.planet, 3)
         alt, az = self.convert_coordinates(positions[:,:,0],positions[:,:,1],positions[:,:,2])
 
         positions = torch.stack([az, alt], dim=-1)
-        positions = positions.reshape(B, args.planet * 2)
         return positions
         ### End Model ###
 
+    def convert_coordinates(self, x, y, z):
+
+        view_x, view_y, view_z = self.gps_to_ecef_custom(self.args.latitude, self.args.longtitude, 6378.1370)
+        planet_lla = self.ecef2lla(x - view_x, y - view_y, z - view_z)
+
+        return planet_lla[:,:,1], planet_lla[:,:,0]
+
+
     def gps_to_ecef_custom(self, lat, lon, alt):
-        rad_lat = lat * torch.tensor(np.pi / 180.0).to(self.device)
-        rad_lon = lon * torch.tensor(np.pi / 180.0).to(self.device)
 
-        a = torch.tensor(6378137, dtype=torch.float).to(self.device)
-        finv = 298.257223563
-        f = 1 / finv
-        e2 = 1 - (1 - f) * (1 - f)
-        e2 =  torch.tensor(e2, dtype=torch.float).to(self.device)
-        v = torch.div(a, torch.sqrt(1 - e2 * torch.sin(rad_lat) * torch.sin(rad_lat)))
+        equatorial_radius = 6378.1370
+        polar_radius = 6356.7523
 
-        x = (v + alt) * torch.cos(rad_lat) * torch.cos(rad_lon)
-        y = (v + alt) * torch.cos(rad_lat) * torch.sin(rad_lon)
-        z = (v * (1 - e2) + alt) * torch.sin(rad_lat)
+        rad_lat = torch.tensor(lat) * np.pi / 180
+        rad_lon = torch.tensor(lon) * np.pi / 180
 
-        return x, y, z
+        e2 = torch.tensor(1 - (polar_radius ** 2) / (equatorial_radius ** 2), dtype=torch.float)
+        sin_phi = torch.sin(rad_lat)
+        N_phi = torch.div(equatorial_radius, (1 - e2 * torch.pow(sin_phi, 2)))
+
+        x_view = (N_phi + alt) * torch.cos(rad_lat) * torch.cos(rad_lon)
+        y_view = (N_phi + alt) * torch.cos(rad_lat) * torch.sin(rad_lon)
+        z_view = (N_phi * (1 - e2) + alt) * torch.cos(rad_lat) * torch.cos(rad_lon)
+
+        return x_view, y_view, z_view
 
 
 
@@ -80,7 +88,7 @@ class Module(nn.Module):
         e = torch.sqrt(torch.div(torch.pow(a, 2) - torch.pow(b, 2) , torch.pow(a, 2)))
         e2 = torch.sqrt(torch.div(torch.pow(a, 2) - torch.pow(b, 2) , torch.pow(b, 2)))
 
-        lla = torch.zeros(3, B, self.args.planet).to(self.device)
+        lla = torch.zeros(B, self.args.planet, 3).to(self.device)
 
         p = torch.sqrt(torch.pow(x, 2) + torch.pow(y, 2))
 
@@ -98,49 +106,11 @@ class Module(nn.Module):
 
         lon = torch.div(lon * 180, torch.tensor(np.pi)).to(self.device)
         lat = torch.div(lat * 180, torch.tensor(np.pi)).to(self.device)
-        lla[0] = lat
-        lla[1] = lon
-        lla[2] = height
+        lla[:, :, 0] = lat
+        lla[:, :, 1] = lon
+        lla[:, :, 2] = height
 
         return lla
-
-
-    def bearing(self, lat1, lon1, lat2, lon2):
-        y = torch.sin(lon2-lon1) * torch.cos(lat2)
-        x = torch.cos(lat1)*torch.sin(lat2) - torch.sin(lat1)*torch.cos(lat2)*torch.cos(lon2-lon1)
-        theta = torch.atan2(y, x)
-        brng = torch.fmod(theta*180/np.pi + 360, 360)
-        return brng
-
-    def angle_between(self, v1, v2):
-        v1_u = torch.div(v1 , torch.norm(v1, dim=1).unsqueeze(1).repeat(1, 3))
-        v1_u = v1_u.unsqueeze(1)
-        # print(v1_u.shape)
-        v2_u = torch.div(v2 , torch.norm(v2, dim=2).unsqueeze(2).repeat(1, 1, 3))
-        return torch.arccos(torch.clip(torch.bmm(v1_u, torch.transpose(v2_u, 1, 2)), -1.0, 1.0)).squeeze()
-
-    def convert_coordinates(self, x, y, z):
-        x_pos, y_pos, z_pos = self.gps_to_ecef_custom(self.args.latitude, self.args.longtitude, self.args.alt)
-        B = x.shape[0]
-        b_x = x_pos.expand(B,self.args.planet).to(self.device)
-        b_y = y_pos.expand(B,self.args.planet).to(self.device)
-        b_z = z_pos.expand(B,self.args.planet).to(self.device)
-
-        a_x = x_pos.expand(B).to(self.device)
-        a_y = y_pos.expand(B).to(self.device)
-        a_z = z_pos.expand(B).to(self.device)
-
-        a = torch.stack([a_x, a_y, a_z], dim=-1)
-        b = torch.stack([x-b_x, y-b_y, z-b_z], dim=-1)
-        altitude = self.angle_between(a, b)
-
-        lon2, lat2, _ = self.ecef2lla(x, y, z)
-        lat1 = torch.tensor(self.args.latitude).repeat(B, self.args.planet)
-        lon1 = torch.tensor(self.args.longtitude).repeat(B, self.args.planet)
-        azimuth = self.bearing(lat1, lon1, lat2, lon2)
-
-
-        return altitude, azimuth
 
     def run_train(self, data):
         ### Setup ###
@@ -173,8 +143,6 @@ class Module(nn.Module):
             train_size = torch.tensor(0, dtype=torch.float)
 
             self.train()
-
-
 
             for batch in tqdm.tqdm(train_dataloader, desc=train_description):
                 batch_idx+=1
@@ -228,16 +196,52 @@ class Module(nn.Module):
 
     def evaluate(self, data):
         self.eval()
+        args = self.args
         with open(data, 'r') as file:
             dataset = json.load(file)
         dataset = PlanetDataset(dataset, self.args)
         dataloader = DataLoader(dataset, batch_size=args.batch, shuffle=True, num_workers=args.workers, collate_fn=collate_fn)
         description = "Evaluating..."
+
+        loss = [torch.tensor(0, dtype=torch.float) for i in range(self.args.planet)]
+        size = torch.tensor(0, dtype=torch.float)
+
         with torch.no_grad():
             for batch in tqdm.tqdm(dataloader, desc=description):
+                batch_size = batch['time'].shape[0]
+
+                ### Move data to GPU if available ###
+                times = batch['time'].to(self.device)
+                # planet_times = batch['planet_times'].to(self.device)
+
+                true_position = batch['pos'].to(self.device)
+
+                ### Run forward ###
+                pred_position = self.forward(times)
+
+                true = []
+                pred = []
+                true_az_sin = torch.sin(torch.deg2rad(true_position[:, :, 0]))
+                true_az_cos = torch.cos(torch.deg2rad(true_position[:, :, 0]))
+                true_alt_sin = torch.sin(torch.deg2rad(true_position[:, :, 1]))
+                true_alt_cos = torch.cos(torch.deg2rad(true_position[:, :, 1]))
+
+                pred_az_sin = torch.sin(torch.deg2rad(pred_position[:, :, 0]))
+                pred_az_cos = torch.cos(torch.deg2rad(pred_position[:, :, 0]))
+                pred_alt_sin = torch.sin(torch.deg2rad(pred_position[:, :, 1]))
+                pred_alt_cos = torch.cos(torch.deg2rad(pred_position[:, :, 1]))
+
+                true_positions = torch.stack([true_az_sin, true_az_cos, true_alt_sin, true_alt_cos], dim=2)
+                pred_positions = torch.stack([pred_az_sin, pred_az_cos, pred_alt_sin, pred_alt_cos], dim=2)
+                pred_positions_by_planet = [pred_positions[:, i].reshape(batch_size, -1)  for i in range(args.planet)]
+                true_positions_by_planet = [true_positions[:, i].reshape(batch_size, -1)  for i in range(args.planet)]
+
+
+                loss_by_planet = [F.mse_loss(pred_positions_by_planet[i], true_positions_by_planet[i], reduction='sum') for i in range(self.args.planet)]
                 size += batch['time'].shape[0] ## Used to normalize loss when plotting
-                loss += self.compute_loss(batch)
-        return (loss / size).item()
+                loss = [loss_by_planet[i] + loss[i] for i in range(self.args.planet)]
+
+        return [(loss[i] / size).item() for i in range(self.args.planet)]
 
 
     def compute_loss(self, batch):
@@ -245,12 +249,29 @@ class Module(nn.Module):
 
         ### Move data to GPU if available ###
         times = batch['time'].to(self.device)
-        true_positions = batch['pos'].to(self.device)
-
+        # planet_times = batch['planet_times'].to(self.device)
+        true_position = batch['pos'].to(self.device)
         ### Run forward ###
-        pred_positions = self.forward(times)
+        pred_position = self.forward(times)
+
+        # B x planets x 2
+
+        # B x planets x 4 -> sin(alt), cos(alt), sin(az), cos(az)
+        true = []
+        pred = []
+        true_az_sin = torch.sin(torch.deg2rad(true_position[:, :, 0]))
+        true_az_cos = torch.cos(torch.deg2rad(true_position[:, :, 0]))
+        true_alt_sin = torch.sin(torch.deg2rad(true_position[:, :, 1]))
+        true_alt_cos = torch.cos(torch.deg2rad(true_position[:, :, 1]))
+
+        pred_az_sin = torch.sin(torch.deg2rad(pred_position[:, :, 0]))
+        pred_az_cos = torch.cos(torch.deg2rad(pred_position[:, :, 0]))
+        pred_alt_sin = torch.sin(torch.deg2rad(pred_position[:, :, 1]))
+        pred_alt_cos = torch.cos(torch.deg2rad(pred_position[:, :, 1]))
+
+        true_positions = torch.stack([true_az_sin, true_az_cos, true_alt_sin, true_alt_cos], dim=2)
+        pred_positions = torch.stack([pred_az_sin, pred_az_cos, pred_alt_sin, pred_alt_cos], dim=2)
 
         ### Compute loss on results ###
         loss = F.mse_loss(pred_positions, true_positions, reduction='sum')
-
         return loss
