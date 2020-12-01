@@ -38,6 +38,7 @@ With the following flags:
 --writer              Location where your model plot writes to
 --eval                Whether to run eval
 --eval_store          Where to dump eval results
+--saved_model         Location of model to load
 --start_time          First year
 --gpu                 Use gpu
 --workers             Number of workers for each dataloader
