@@ -18,7 +18,7 @@ if __name__ == '__main__':
     parser.add_argument('--dout', help='Location where your model saves to', default='exp/{model}/{model}_d{data}_s{seed}.pth')
     parser.add_argument('--writer', help='Location where your model plot writes to', default='runs/{model}/{model}_d{data}_s{seed}')
     parser.add_argument('--eval', help='Whether to run eval', action='store_true')
-    # parser.add_argument('--saved_model', help='Location of model to load', default=None)
+    parser.add_argument('--saved_model', help='Location of model to load', default=None)
     parser.add_argument('--eval_store', help='Where to dump eval results', default='results.json')
 
     parser.add_argument('--start_time', help='First year', default="0000_01_01_00:00")
