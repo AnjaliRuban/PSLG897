@@ -15,7 +15,7 @@ pip install -r requirements.txt
 ```
 
 ## Generating Data
-All data found in this repository was generated via https://github.com/AlokElashoff/PSEG897. All observations were generated using the crosstaff tool at 20.5937° N 78.9629° E each day at 18:30 UTC to represent the data collection process of the ancient Indian astronomers.
+All data found in this repository was generated using the methods described in [Data Generation for Measured Planetary Positions in the Night Sky](https://github.com/AlokElashoff/PSEG897). All observations were generated using the crosstaff tool at 20.5937° N 78.9629° E each day at 18:30 UTC to represent the data collection process of the ancient Indian astronomers.
 
 | Dataset | Train Time Period | Eval Time Period |
 | --- | --- | --- |
