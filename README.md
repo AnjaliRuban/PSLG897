@@ -14,6 +14,11 @@ We provide a requirements.txt. You can ensure you have all the necessary require
 pip install -r requirements.txt
 ```
 
+To set up the envrionment variables required to access the data and models, run the following command inside the root directory of the project:
+```
+export L189_ROOT=$(pwd)
+```
+
 ## Generating Data
 All data found in this repository was generated using the methods described in [Data Generation for Measured Planetary Positions in the Night Sky](https://github.com/AlokElashoff/PSEG897). All observations were generated using the crosstaff tool at 20.5937° N 78.9629° E each day at 18:30 UTC to represent the data collection process of the ancient Indian astronomers.
 
