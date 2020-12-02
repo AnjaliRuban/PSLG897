@@ -14,11 +14,6 @@ We provide a requirements.txt. You can ensure you have all the necessary require
 pip install -r requirements.txt
 ```
 
-To set up the envrionment variables required to access the data and models, run the following command inside the root directory of the project:
-```
-export L189_ROOT=$(pwd)
-```
-
 ## Generating Data
 All data found in this repository was generated using the methods described in [Data Generation for Measured Planetary Positions in the Night Sky](https://github.com/AlokElashoff/PSEG897). All observations were generated using the crosstaff tool at 20.5937° N 78.9629° E each day at 18:30 UTC to represent the data collection process of the ancient Indian astronomers.
 
@@ -56,3 +51,10 @@ With the following flags:
 --alt                 Observational altitude on Earth
 --seed                Random seed
 ```
+
+## Navigating the Repository
+The generated data that we used for our models is stored in the data folder. The data used to train the models are the files 'aryabhata.json', 'lata.json', 'somayaji.json', and 'common.json' where each of the first three files were used to train the respective astronomer's models and the last file was used as a common train set. The same file names but with '\_eval' at the end are the train sets used for each of the models.
+
+The actual models are stored in the models folder under the astronomer's name and the baseline model is stored as 'baseline.py.' The 'planet_loader.py' file loads the data and parses it.
+
+The file to train and evaluate all models is stored under the train folder in 'train_ancient.py'
