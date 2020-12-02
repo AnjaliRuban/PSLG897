@@ -62,4 +62,4 @@ The generated data that we used for our models is stored in the data folder. The
 
 The actual models are stored in the models folder under the astronomer's name and the baseline model is stored as 'baseline.py.' The 'planet_loader.py' file loads the data and parses it.
 
-The file to train and evaluate all models is stored under the train folder in 'train_ancient.py'
+The file to train and evaluate all models is stored under the train folder in 'train_ancient.py'.
